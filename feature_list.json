@@ -37,7 +37,7 @@
         "保留 chunk_count 和参与节点集合以支撑 TE-CCL epoch/chunk 调度"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-04-runtime-engine-baseline",

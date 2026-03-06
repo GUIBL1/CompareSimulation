@@ -72,19 +72,21 @@ class TECCLScheduler(Scheduler):
         actions: list[EpochAction] = []
         if not job.participants:
             return actions
-        source_gpu = job.participants[0]
         for demand in job.communication_demands:
             for chunk in demand.chunks:
-                for destination in job.participants[1:]:
-                    actions.append(
-                        EpochAction(
-                            epoch_index=current_epoch,
-                            chunk_id=chunk.chunk_id,
-                            source_gpu=source_gpu,
-                            current_node=source_gpu,
-                            next_node=destination,
-                            expected_arrival_epoch=current_epoch + 1,
-                            route_fragment=[source_gpu, destination],
+                for source_gpu in chunk.source_set:
+                    for destination in chunk.destination_set:
+                        if source_gpu == destination:
+                            continue
+                        actions.append(
+                            EpochAction(
+                                epoch_index=current_epoch,
+                                chunk_id=chunk.chunk_id,
+                                source_gpu=source_gpu,
+                                current_node=source_gpu,
+                                next_node=destination,
+                                expected_arrival_epoch=current_epoch + 1,
+                                route_fragment=[source_gpu, destination],
+                            )
                         )
-                    )
         return actions

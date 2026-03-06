@@ -12,6 +12,25 @@
 ## 2026-03-06 任务初始化
 - 实现: 建立联合仿真系统的长运行交接文件。
 - 文件: plan.md, feature_list.json, progress.md, prompt.md
+
+### 本次改动
+- 为 Chunk 增加了 chunk_index、dependency_parent_ids、collective_type 和 metadata，使 chunk 不再只是简单的数据切片。
+- 为 CommunicationDemand 增加了 demand_id、participants、source_set、destination_set、chunk_size_mb 和 metadata，明确 collective 内部语义。
+- 为 UnifiedJob 增加 metadata，并把 communication_pattern、dependency_mode、chunk_count 等公共字段标准化保留下来。
+- 实现了 communication_pattern 的内部归一化和 source_set/destination_set 推导，覆盖 all_reduce、broadcast、reduce、point_to_point 等常见模式。
+- 实现了 dependency_mode 的内部语义转换，支持 independent、strict 和 barrier 类 chunk 依赖表示。
+- 调整 TE-CCL 骨架，使其消费 chunk.source_set 和 chunk.destination_set，而不是硬编码使用第一个参与者作为源。
+
+### 验证结果
+- 在 networkSimulation 环境中成功将 workload.template.yaml 转换为 UnifiedJob，并保留 compute_phase_ms、chunk_count、participants 等关键字段。
+- all_reduce 模板样例被标准化为 many_to_many 语义，chunk_size_mb 正确为 64.0 MB。
+- broadcast 样例正确推导出单源多目的语义，reduce 样例正确推导出多源单目的语义。
+- strict dependency_mode 能为后续 chunk 生成链式 dependency_parent_ids。
+- TE-CCL 调度骨架已能基于统一 workload 语义为 broadcast 生成 epoch_actions。
+
+### 下一步建议
+- 进入 stage-04-runtime-engine-baseline，补齐 RuntimeState、LinkState、FlowState 的生命周期和事件推进。
+- 让 scheduler 的统一输出真正驱动链路占用、带宽共享和完成事件，而不再停留在静态决策层。
 - 状态: 进行中
 
 ## 2026-03-06 配置契约阶段
@@ -66,10 +85,11 @@
 - 文档和配置模板已落地。
 - Python 代码骨架已落地并通过基础静态校验。
 - 已完成 topology builder 的 generated/explicit 双模式构建与候选路径枚举。
-- 运行时执行器、统一工作负载转换、CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
+- 已完成统一工作负载语义转换，覆盖 chunk 切分、collective 源宿集合和 dependency_mode 归一化。
+- 运行时执行器、CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-03-unified-workload-model，补齐统一工作负载语义转换。
+- 优先完成 stage-04-runtime-engine-baseline，补齐离散事件执行器与链路共享基线。
 - 接着完成最小 runtime engine，使 scheduler 输出可以驱动一次基础仿真。
 - 然后分别补齐 CRUX 基线和 TE-CCL 小规模求解后端。
 
