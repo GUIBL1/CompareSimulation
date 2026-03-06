@@ -11,7 +11,7 @@
         "为缺省字段定义默认值和报错规则"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-02-topology-loader-builder",

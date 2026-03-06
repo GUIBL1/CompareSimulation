@@ -14,8 +14,8 @@ class MetaConfig:
 
 @dataclass(slots=True)
 class TopologySection:
-    mode: str
-    type: str
+    mode: str = "generated"
+    type: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
 
 
@@ -29,8 +29,8 @@ class NodesSection:
 
 @dataclass(slots=True)
 class LinksSection:
-    default_bandwidth_gbps: float
-    default_latency_us: float
+    default_bandwidth_gbps: float = 0.0
+    default_latency_us: float = 0.0
     bidirectional: bool = True
     explicit_links: list[dict[str, Any]] = field(default_factory=list)
     overrides: list[dict[str, Any]] = field(default_factory=list)
@@ -89,11 +89,11 @@ class SchedulerConfig:
 
 @dataclass(slots=True)
 class SimulationConfig:
-    time_unit: str
-    max_time_ms: int
-    bandwidth_sharing_model: str
-    random_seed: int
-    repetitions: int
+    time_unit: str = "ms"
+    max_time_ms: int = 0
+    bandwidth_sharing_model: str = "max_min_fair"
+    random_seed: int = 0
+    repetitions: int = 1
 
 
 @dataclass(slots=True)
