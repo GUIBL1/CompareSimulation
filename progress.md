@@ -19,6 +19,26 @@
 - 文件: simulator/config/models.py, simulator/config/loaders.py, feature_list.json, progress.md
 - 状态: ✅ 已完成
 
+## 2026-03-06 拓扑构建阶段
+- 实现: 完成 stage-02-topology-loader-builder。
+- 文件: simulator/topology/builder.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 为 explicit 拓扑补充了节点存在性校验和链路对象构建逻辑。
+- 为 generated 模式补充了 fat-tree 展开，生成 host、gpu、tor、aggregation、core 节点及其链路关系。
+- 将链路带宽、时延、单双向属性和 overrides 映射到内部 Link 对象。
+- 为 gpu 和 host 端点对生成最短路径候选集，并写入 TopologyGraph.candidate_paths。
+
+### 验证结果
+- 在 networkSimulation 环境中成功构建 topology.template.yaml，对应 fat-tree 生成 100 个节点、112 条链路、6320 组候选路径。
+- 冒烟验证显示 gpu_0_0 到 gpu_1_0 已能生成可消费路径。
+- 额外用内存中的 explicit 拓扑验证了 explicit_links、链路 overrides 和 candidate_paths 输出。
+
+### 下一步建议
+- 进入 stage-03-unified-workload-model，补齐 UnifiedJob、CommunicationDemand、Chunk 的语义转换与字段归一化。
+- 让 workload 层直接为后续 CRUX 和 TE-CCL 调度器暴露 chunk_count、participants、compute_phase_ms 等公共字段。
+
 ### 本次改动
 - 为 topology、workload、experiment 三类配置补充了加载阶段的契约校验。
 - 为缺省字段补充了默认值，并把缺失输入文件、错误 section 类型、非法取值等情况统一改为明确报错。
@@ -45,10 +65,11 @@
 ### 当前代码状态
 - 文档和配置模板已落地。
 - Python 代码骨架已落地并通过基础静态校验。
-- 运行时执行器、候选路径枚举、CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
+- 已完成 topology builder 的 generated/explicit 双模式构建与候选路径枚举。
+- 运行时执行器、统一工作负载转换、CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-02-topology-loader-builder，补齐 topology builder 的真实展开逻辑与候选路径枚举。
+- 优先完成 stage-03-unified-workload-model，补齐统一工作负载语义转换。
 - 接着完成最小 runtime engine，使 scheduler 输出可以驱动一次基础仿真。
 - 然后分别补齐 CRUX 基线和 TE-CCL 小规模求解后端。
 

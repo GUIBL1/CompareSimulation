@@ -24,7 +24,7 @@
         "为节点对生成候选路径接口"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-03-unified-workload-model",
