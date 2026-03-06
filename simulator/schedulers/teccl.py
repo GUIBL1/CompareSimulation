@@ -9,6 +9,7 @@ from simulator.core.models import RuntimeState
 from simulator.schedulers.base import EpochAction
 from simulator.schedulers.base import ScheduleDecision
 from simulator.schedulers.base import Scheduler
+from simulator.schedulers.teccl_solver import SmallScaleDebugSolver
 from simulator.workload.models import UnifiedJob
 
 
@@ -53,6 +54,7 @@ class TECCLScheduler(Scheduler):
     strategy: TECCLStrategy = field(default_factory=TECCLStrategy)
     pending_jobs: list[str] = field(default_factory=list)
     job_states: dict[str, TECCLJobState] = field(default_factory=dict)
+    last_solver_report: dict[str, object] = field(default_factory=dict)
 
     def on_workload_arrival(self, job: UnifiedJob, runtime_state: RuntimeState) -> None:
         if job.job_id not in self.pending_jobs:
@@ -68,11 +70,40 @@ class TECCLScheduler(Scheduler):
     def compute_schedule(self, runtime_state: RuntimeState) -> ScheduleDecision:
         current_epoch = int(ceil(runtime_state.now_ms / self.strategy.epoch_size_ms))
         epoch_actions: list[EpochAction] = []
+        solver_reports: dict[str, object] = {}
         for job in runtime_state.active_jobs:
             job_state = self.job_states.setdefault(job.job_id, self._build_job_state(job))
             job_state.current_epoch = current_epoch
             self._synchronize_job_state(job_state, runtime_state, current_epoch)
-            epoch_actions.extend(self._build_epoch_actions(job, job_state, runtime_state, current_epoch))
+            solver_result = self._solve_job_epoch(job, job_state, runtime_state, current_epoch)
+            epoch_actions.extend(solver_result.epoch_actions)
+            solver_reports[job.job_id] = {
+                "metadata": solver_result.metadata,
+                "constraint_reports": [
+                    {
+                        "replica_id": report.replica_id,
+                        "node_id": report.node_id,
+                        "node_kind": report.node_kind,
+                        "incoming_count": report.incoming_count,
+                        "outgoing_count": report.outgoing_count,
+                        "gpu_buffer_available": report.gpu_buffer_available,
+                        "switch_replication_allowed": report.switch_replication_allowed,
+                    }
+                    for report in solver_result.constraint_reports
+                ],
+                "selected_candidates": [
+                    {
+                        "replica_id": candidate.replica_id,
+                        "current_node": candidate.current_node,
+                        "next_node": candidate.next_node,
+                        "ultimate_destination": candidate.ultimate_destination,
+                        "node_kind": candidate.node_kind,
+                        "expected_arrival_epoch": candidate.expected_arrival_epoch,
+                    }
+                    for candidate in solver_result.selected_candidates
+                ],
+            }
+        self.last_solver_report = solver_reports
         return ScheduleDecision(
             decision_time_ms=runtime_state.now_ms,
             valid_until_ms=runtime_state.now_ms + self.strategy.epoch_size_ms,
@@ -85,6 +116,7 @@ class TECCLScheduler(Scheduler):
                 "enable_gpu_buffer": self.strategy.enable_gpu_buffer,
                 "enable_switch_buffer": self.strategy.enable_switch_buffer,
                 "job_states": self._build_debug_job_summary(),
+                "solver_reports": solver_reports,
             },
         )
 
@@ -100,7 +132,20 @@ class TECCLScheduler(Scheduler):
                 "enable_switch_buffer": self.strategy.enable_switch_buffer,
             },
             "job_states": self._build_debug_job_summary(),
+            "solver_reports": dict(self.last_solver_report),
         }
+
+    def _solve_job_epoch(
+        self,
+        job: UnifiedJob,
+        job_state: TECCLJobState,
+        runtime_state: RuntimeState,
+        current_epoch: int,
+    ):
+        if self.strategy.solver_backend == "small_scale_debug_solver":
+            solver = SmallScaleDebugSolver(strategy=self.strategy)
+            return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
+        raise ValueError(f"Unsupported TECCL solver_backend: {self.strategy.solver_backend}")
 
     def _build_epoch_actions(
         self,

@@ -89,7 +89,7 @@
         "将求解结果转换为统一 epoch_actions"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-08-teccl-heuristic-backend",

@@ -29,6 +29,27 @@
 - 文件: simulator/schedulers/base.py, simulator/schedulers/teccl.py, simulator/core/engine.py, feature_list.json, progress.md
 - 状态: ✅ 已完成
 
+## 2026-03-06 TE-CCL 小规模求解阶段
+- 实现: 完成 stage-07-teccl-small-scale-solver。
+- 文件: simulator/schedulers/teccl_solver.py, simulator/schedulers/teccl.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 新增 [simulator/schedulers/teccl_solver.py](simulator/schedulers/teccl_solver.py)，实现 small_scale_debug_solver，用于按 epoch 对小规模 TE-CCL 动作做精确枚举搜索。
+- 在求解器中显式区分 GPU 与交换机约束：GPU 候选动作以 buffer 可用性为前提，并在允许复制时支持多个 outgoing；交换机候选动作仅在 arrival epoch 存在，并在不允许复制时最多选择一个 outgoing。
+- 为求解器增加 constraint_reports 和 selected_candidates 调试输出，便于直接检查流守恒假设是否符合 TE-CCL 论文语义。
+- 将求解结果稳定转换为统一 epoch_actions，并通过 solver_reports 接入 TECCL scheduler 的 metadata 与 debug state。
+
+### 验证结果
+- 在 direct GPU 三节点 broadcast 小样例上，small_scale_debug_solver 输出 2 个 GPU 动作，证明 GPU 复制没有被误退化成 incoming 等于 outgoing。
+- 复制样例的 constraint_reports 显示 GPU 节点 outgoing_count 为 2，且 gpu_buffer_available 为 true，符合“GPU 可复制且有 buffer”的约束语义。
+- 在 GPU-switch-GPU 样例上，epoch 1 的 solver 输出仅包含 switch 到 GPU 的动作，constraint_reports 显示 switch 节点 incoming_count 为 1、outgoing_count 为 1，符合“交换机不可复制”的约束语义。
+- 所有求解动作都被转换为统一 epoch_actions，并在 metadata 中标记 solver_backend 为 small_scale_debug_solver。
+
+### 下一步建议
+- 进入 stage-08-teccl-heuristic-backend，基于当前 solver/state/output 契约实现中大规模启发式后端。
+- 保持与 small_scale_debug_solver 相同的 epoch_actions 输出格式，以便后续直接做行为对比。
+
 ### 本次改动
 - 为 TE-CCL 增加内部状态模型，显式表示 job 级 epoch 状态、chunk replica、GPU buffer、交换机瞬时到达状态和 in-flight 目标。
 - 将 GPU 与交换机的语义分开实现：GPU 支持复制并可持久保留 chunk buffer，交换机不支持复制且只在到达 epoch 参与瞬时转发。
@@ -155,10 +176,11 @@
 - 已完成最小离散事件执行器、链路带宽共享基线和 runner.run 主路径。
 - 已完成 CRUX 基线的 intensity 排序、priority 压缩和 candidate path 选择。
 - 已完成 TE-CCL 的 epoch/chunk/buffer 语义和 GPU/交换机差异化状态表示。
-- TE-CCL 小规模求解器和指标导出尚未完成。
+- 已完成 TE-CCL 小规模可验证求解后端，并能输出约束报告与统一 epoch_actions。
+- TE-CCL 启发式后端和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-07-teccl-small-scale-solver，补齐小规模可验证求解后端。
+- 优先完成 stage-08-teccl-heuristic-backend，补齐中大规模启发式后端。
 - 然后完成实验指标导出和结果系统。
 
 ### 交接约束
