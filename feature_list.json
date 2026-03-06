@@ -115,7 +115,7 @@
         "保证输出结果可复用到后续绘图和对比分析"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-10-minimal-end-to-end-experiments",

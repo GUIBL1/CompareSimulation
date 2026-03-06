@@ -205,6 +205,27 @@
 - 优先完成 stage-09-runner-and-metrics，补齐结果导出与指标系统。
 - 然后完成最小端到端实验验证。
 
+## 2026-03-06 Runner 与指标导出阶段
+- 实现: 完成 stage-09-runner-and-metrics。
+- 文件: simulator/core/models.py, simulator/core/engine.py, simulator/metrics/__init__.py, simulator/metrics/exporters.py, simulator/experiment/runner.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 将 [simulator/experiment/runner.py](simulator/experiment/runner.py) 从单次运行扩展为按 repetition 批量执行，并新增 export_results 主路径，统一返回实验级结果对象。
+- 在 [simulator/core/engine.py](simulator/core/engine.py) 和 [simulator/core/models.py](simulator/core/models.py) 中为每条链路补充 utilization_history，记录初始态、带宽重分配和时间推进后的负载时序。
+- 新增 [simulator/metrics/exporters.py](simulator/metrics/exporters.py)，统一导出 summary、链路负载时间序列、flow trace、schedule history 和 scheduler debug state。
+- 导出结果同时覆盖通用指标、CRUX 指标和 TE-CCL 指标，并保持 CSV 与 JSON 两种可复用格式，便于后续绘图与公平对比分析。
+
+### 验证结果
+- 在 networkSimulation 环境中通过 experiment.template.yaml 跑通 CRUX runner.export_results，成功生成 summary.json、summary.csv、link_load_trace.csv、scheduler_debug.json、flow_trace.csv 和 schedule_history.json。
+- summary 文件已包含 completion_time_ms、completed_flow_count、average_link_utilization 等通用指标，以及 CRUX 专属 intensity/path/priority 指标。
+- link_load_trace 文件已按 repetition、link_id 和 time_ms 记录链路负载时间序列，可直接用于后续绘图。
+- scheduler_debug.json 已持久化 scheduler.export_debug_state 和 schedule_history，能够复用到后续归因分析。
+
+### 下一步建议
+- 进入 stage-10-minimal-end-to-end-experiments，分别用公共环境参数跑通 CRUX 与 TE-CCL 的最小实验。
+- 检查结果目录中的统一指标文件是否已足够支撑后续实验矩阵与对比图表。
+
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。
 - 任何新的上下文窗口开始工作前，必须先读取 prompt.md、progress.md、feature_list.json 和 plan.md。

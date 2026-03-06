@@ -70,6 +70,7 @@ class RuntimeEngine:
             )
             for link in runtime.topology.links
         }
+        self._record_link_snapshot(runtime, reason="initial")
 
     def _build_link_lookup(self, runtime: RuntimeState) -> dict[tuple[str, str], Link]:
         lookup: dict[tuple[str, str], Link] = {}
@@ -260,6 +261,7 @@ class RuntimeEngine:
                 if flow_id in runtime.flow_states
             )
             link_state.utilization = min(1.0, consumed / link_state.bandwidth_gbps)
+        self._record_link_snapshot(runtime, reason="allocation")
 
     def _estimate_next_completion_time(self, runtime: RuntimeState) -> float:
         completion_times: list[float] = []
@@ -288,6 +290,7 @@ class RuntimeEngine:
             link_state.transmitted_mb += total_rate_mb_per_ms * delta_ms
             link_state.last_update_ms = target_time_ms
         runtime.now_ms = target_time_ms
+        self._record_link_snapshot(runtime, reason="advance")
 
     def _complete_ready_flows(self, runtime: RuntimeState) -> bool:
         completed_any = False
@@ -332,3 +335,25 @@ class RuntimeEngine:
 
     def _gbps_to_mb_per_ms(self, gbps: float) -> float:
         return gbps * 0.125
+
+    def _record_link_snapshot(self, runtime: RuntimeState, reason: str) -> None:
+        for link_state in runtime.link_states.values():
+            snapshot = {
+                "time_ms": runtime.now_ms,
+                "utilization": link_state.utilization,
+                "active_flow_count": len(link_state.active_flows),
+                "queue_backlog_mb": link_state.queue_backlog_mb,
+                "transmitted_mb": link_state.transmitted_mb,
+                "reason": reason,
+            }
+            if link_state.utilization_history:
+                last_snapshot = link_state.utilization_history[-1]
+                if (
+                    abs(float(last_snapshot["time_ms"]) - runtime.now_ms) <= 1e-12
+                    and abs(float(last_snapshot["utilization"]) - link_state.utilization) <= 1e-12
+                    and int(last_snapshot["active_flow_count"]) == len(link_state.active_flows)
+                    and abs(float(last_snapshot["transmitted_mb"]) - link_state.transmitted_mb) <= 1e-12
+                ):
+                    last_snapshot["reason"] = reason
+                    continue
+            link_state.utilization_history.append(snapshot)

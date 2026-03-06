@@ -45,6 +45,7 @@ class LinkState:
     queue_backlog_mb: float = 0.0
     transmitted_mb: float = 0.0
     last_update_ms: float = 0.0
+    utilization_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

@@ -5,3 +5,5 @@ simulator/schedulers/__pycache__
 simulator/core/__pycache__
 simulator/workload/__pycache__
 simulator/experiment/__pycache__
+simulator/metrics/__pycache__
+results/
