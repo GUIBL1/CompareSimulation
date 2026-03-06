@@ -50,6 +50,7 @@ class SolverResult:
 @dataclass(slots=True)
 class SmallScaleDebugSolver:
     strategy: "TECCLStrategy"
+    solver_name: str = field(default="small_scale_debug_solver", init=False)
 
     def solve_epoch(
         self,
@@ -82,7 +83,7 @@ class SmallScaleDebugSolver:
             selected_candidates=best_plan,
             constraint_reports=constraint_reports,
             metadata={
-                "solver_name": "small_scale_debug_solver",
+                "solver_name": self.solver_name,
                 "candidate_group_count": len(grouped_candidates),
                 "selected_action_count": len(best_plan),
             },
@@ -246,7 +247,7 @@ class SmallScaleDebugSolver:
                 "ultimate_destination": candidate.ultimate_destination,
                 "allow_replication": self.strategy.allow_gpu_replication if candidate.node_kind == "gpu" else self.strategy.allow_switch_replication,
                 "buffer_enabled": self.strategy.enable_gpu_buffer if candidate.node_kind == "gpu" else self.strategy.enable_switch_buffer,
-                "solver_backend": "small_scale_debug_solver",
+                "solver_backend": self.solver_name,
             },
         )
 
@@ -309,3 +310,83 @@ class SmallScaleDebugSolver:
                 link_latency_ms = link.latency_us / 1000.0
                 return max(1, ceil(link_latency_ms / self.strategy.epoch_size_ms))
         return 1
+
+
+@dataclass(slots=True)
+class HeuristicTECCLSolver(SmallScaleDebugSolver):
+    solver_name: str = field(default="heuristic_solver", init=False)
+
+    def solve_epoch(
+        self,
+        job: "UnifiedJob",
+        job_state: "TECCLJobState",
+        runtime_state: "RuntimeState",
+        current_epoch: int,
+    ) -> SolverResult:
+        grouped_candidates: list[list[SolverCandidateAction]] = []
+        constraint_reports: list[SolverConstraintReport] = []
+
+        for replica_state in job_state.chunk_replicas.values():
+            if replica_state.replica_id in job_state.completed_replica_ids:
+                continue
+            if not self._dependencies_satisfied(replica_state, job_state):
+                continue
+            replica_candidates, replica_reports = self._enumerate_replica_candidates(
+                replica_state,
+                runtime_state,
+                current_epoch,
+            )
+            constraint_reports.extend(replica_reports)
+            if replica_candidates:
+                grouped_candidates.extend(replica_candidates)
+
+        chosen = self._greedy_select(grouped_candidates)
+        epoch_actions = [self._candidate_to_epoch_action(job_state, candidate) for candidate in chosen]
+        return SolverResult(
+            epoch_actions=epoch_actions,
+            selected_candidates=chosen,
+            constraint_reports=constraint_reports,
+            metadata={
+                "solver_name": self.solver_name,
+                "candidate_group_count": len(grouped_candidates),
+                "selected_action_count": len(chosen),
+                "applicability": "prefer medium/large candidate spaces where exhaustive search cost grows quickly",
+                "error_boundary": "greedy heuristic does not guarantee optimal delivered destination count against small_scale_debug_solver",
+            },
+        )
+
+    def _greedy_select(
+        self,
+        grouped_candidates: list[list[SolverCandidateAction]],
+    ) -> list[SolverCandidateAction]:
+        chosen: list[SolverCandidateAction] = []
+        used_switches: set[str] = set()
+        delivered_targets: set[tuple[str, str]] = set()
+
+        for group in grouped_candidates:
+            best_candidate: SolverCandidateAction | None = None
+            for candidate in sorted(group, key=self._heuristic_sort_key):
+                if candidate.node_kind == "switch" and not self.strategy.allow_switch_replication:
+                    if candidate.current_node in used_switches:
+                        continue
+                target_key = (candidate.replica_id, candidate.ultimate_destination)
+                if target_key in delivered_targets:
+                    continue
+                best_candidate = candidate
+                break
+
+            if best_candidate is None:
+                continue
+            chosen.append(best_candidate)
+            delivered_targets.add((best_candidate.replica_id, best_candidate.ultimate_destination))
+            if best_candidate.node_kind == "switch":
+                used_switches.add(best_candidate.current_node)
+
+        return sorted(chosen, key=lambda item: (item.current_node, item.next_node, item.ultimate_destination))
+
+    def _heuristic_sort_key(self, candidate: SolverCandidateAction) -> tuple[int, int, int, int, str, str]:
+        direct_delivery = 0 if len(candidate.route_fragment) == 2 else 1
+        node_bias = 0 if candidate.node_kind == "gpu" else 1
+        expected_arrival = candidate.expected_arrival_epoch
+        path_len = len(candidate.route_fragment)
+        return (direct_delivery, expected_arrival, node_bias, path_len, candidate.current_node, candidate.ultimate_destination)

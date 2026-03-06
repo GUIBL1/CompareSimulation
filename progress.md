@@ -34,6 +34,27 @@
 - 文件: simulator/schedulers/teccl_solver.py, simulator/schedulers/teccl.py, feature_list.json, progress.md
 - 状态: ✅ 已完成
 
+## 2026-03-06 TE-CCL 启发式后端阶段
+- 实现: 完成 stage-08-teccl-heuristic-backend。
+- 文件: simulator/schedulers/teccl_solver.py, simulator/schedulers/teccl.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 在 [simulator/schedulers/teccl_solver.py](simulator/schedulers/teccl_solver.py) 中新增 heuristic_solver，复用 small_scale_debug_solver 的候选生成、约束报告和 epoch_actions 输出契约。
+- 将启发式搜索实现为按候选收益排序的贪心选择，优先选择更早到达、直达且更短路径的动作，同时保持交换机不可复制约束。
+- 将 heuristic_solver 接入 [simulator/schedulers/teccl.py](simulator/schedulers/teccl.py)，与 small_scale_debug_solver 共享同一 scheduler 接口和 solver_reports 输出。
+- 在 solver metadata 中写入适用范围与误差边界，明确该后端适用于中大规模候选空间，但不保证对 delivered destination count 的全局最优性。
+
+### 验证结果
+- heuristic_solver 已能通过 solver_backend 开关被正确选择，且输出的 epoch_actions metadata 中正确标记为 heuristic_solver。
+- 在 direct GPU 三节点 broadcast 小样例上，heuristic_solver 输出 2 个 GPU 复制动作，与 small_scale_debug_solver 的行为一致。
+- 在 GPU-switch-GPU 小样例上，heuristic_solver 仍保持交换机 incoming_count = 1、outgoing_count = 1 的约束语义，没有破坏交换机不可复制假设。
+- heuristic_solver 的 solver_reports 中已包含 applicability 和 error_boundary，可直接用于后续对比记录。
+
+### 下一步建议
+- 进入 stage-09-runner-and-metrics，补齐 experiment runner 的结果导出、链路负载时间序列和调度器调试状态持久化。
+- 让 CRUX 与 TE-CCL 两类后端的运行结果都能稳定写入统一结果目录，供后续实验矩阵和绘图使用。
+
 ### 本次改动
 - 新增 [simulator/schedulers/teccl_solver.py](simulator/schedulers/teccl_solver.py)，实现 small_scale_debug_solver，用于按 epoch 对小规模 TE-CCL 动作做精确枚举搜索。
 - 在求解器中显式区分 GPU 与交换机约束：GPU 候选动作以 buffer 可用性为前提，并在允许复制时支持多个 outgoing；交换机候选动作仅在 arrival epoch 存在，并在不允许复制时最多选择一个 outgoing。
@@ -177,11 +198,12 @@
 - 已完成 CRUX 基线的 intensity 排序、priority 压缩和 candidate path 选择。
 - 已完成 TE-CCL 的 epoch/chunk/buffer 语义和 GPU/交换机差异化状态表示。
 - 已完成 TE-CCL 小规模可验证求解后端，并能输出约束报告与统一 epoch_actions。
-- TE-CCL 启发式后端和指标导出尚未完成。
+- 已完成 TE-CCL 启发式后端，并复用相同 solver_reports 与 epoch_actions 契约。
+- 指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-08-teccl-heuristic-backend，补齐中大规模启发式后端。
-- 然后完成实验指标导出和结果系统。
+- 优先完成 stage-09-runner-and-metrics，补齐结果导出与指标系统。
+- 然后完成最小端到端实验验证。
 
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。

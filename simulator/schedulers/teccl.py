@@ -9,6 +9,7 @@ from simulator.core.models import RuntimeState
 from simulator.schedulers.base import EpochAction
 from simulator.schedulers.base import ScheduleDecision
 from simulator.schedulers.base import Scheduler
+from simulator.schedulers.teccl_solver import HeuristicTECCLSolver
 from simulator.schedulers.teccl_solver import SmallScaleDebugSolver
 from simulator.workload.models import UnifiedJob
 
@@ -144,6 +145,9 @@ class TECCLScheduler(Scheduler):
     ):
         if self.strategy.solver_backend == "small_scale_debug_solver":
             solver = SmallScaleDebugSolver(strategy=self.strategy)
+            return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
+        if self.strategy.solver_backend == "heuristic_solver":
+            solver = HeuristicTECCLSolver(strategy=self.strategy)
             return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
         raise ValueError(f"Unsupported TECCL solver_backend: {self.strategy.solver_backend}")
 

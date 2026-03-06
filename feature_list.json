@@ -102,7 +102,7 @@
         "记录启发式后端的适用范围和误差边界"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-09-runner-and-metrics",
