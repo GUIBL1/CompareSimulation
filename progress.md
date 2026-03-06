@@ -12,6 +12,29 @@
 ## 2026-03-06 任务初始化
 - 实现: 建立联合仿真系统的长运行交接文件。
 - 文件: plan.md, feature_list.json, progress.md, prompt.md
+- 状态: 进行中
+
+## 2026-03-06 运行时基线阶段
+- 实现: 完成 stage-04-runtime-engine-baseline。
+- 文件: simulator/core/models.py, simulator/core/engine.py, simulator/core/__init__.py, simulator/experiment/runner.py, configs/workload/workload.template.yaml, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 扩展 RuntimeState、FlowState、LinkState，并新增 RuntimeEvent，补齐 flow、link 和作业生命周期所需的运行时状态。
+- 新增 simulator/core/engine.py，实现最小事件驱动执行器、事件队列、时间推进、完成事件处理和作业完成判定。
+- 在执行器中实现 max-min fair 近似：按链路上的活跃流数量分摊带宽，并取路径瓶颈作为 flow 的有效带宽。
+- 将调度器输出真正落成可执行 flow：CRUX 通过候选路径实例化 flow，TE-CCL 的 epoch_actions 也会展开成真实链路传输。
+- 为 simulator/experiment/runner.py 增加 run 主路径，使实验配置可以直接驱动 runtime engine。
+- 修正 configs/workload/workload.template.yaml 中的 GPU 参与者命名，使其与生成拓扑实际节点一致。
+
+### 验证结果
+- 在 networkSimulation 环境中通过 configs/experiment/experiment.template.yaml 跑通 CRUX 基线路径，运行结束时间为 655.36 ms，完成 192 条 flow，6 条链路出现实际传输。
+- 在最小 explicit 拓扑上跑通 TE-CCL runtime 冒烟验证，2 条 flow 在 3.2 ms 内完成，2 条链路记录到传输量。
+- 终止条件已修正：所有作业完成后，运行时不会继续无意义地推进到 max_time_ms。
+
+### 下一步建议
+- 进入 stage-05-crux-baseline，补齐候选路径选择、优先级压缩和稳定决策输出。
+- 让 CRUX 不再只输出 job 级 priority_assignments，而是开始输出更具体的 path_assignments。
 
 ### 本次改动
 - 为 Chunk 增加了 chunk_index、dependency_parent_ids、collective_type 和 metadata，使 chunk 不再只是简单的数据切片。
@@ -86,11 +109,11 @@
 - Python 代码骨架已落地并通过基础静态校验。
 - 已完成 topology builder 的 generated/explicit 双模式构建与候选路径枚举。
 - 已完成统一工作负载语义转换，覆盖 chunk 切分、collective 源宿集合和 dependency_mode 归一化。
-- 运行时执行器、CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
+- 已完成最小离散事件执行器、链路带宽共享基线和 runner.run 主路径。
+- CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-04-runtime-engine-baseline，补齐离散事件执行器与链路共享基线。
-- 接着完成最小 runtime engine，使 scheduler 输出可以驱动一次基础仿真。
+- 优先完成 stage-05-crux-baseline，补齐 CRUX 的路径选择和优先级压缩逻辑。
 - 然后分别补齐 CRUX 基线和 TE-CCL 小规模求解后端。
 
 ### 交接约束

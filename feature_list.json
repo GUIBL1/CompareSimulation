@@ -50,7 +50,7 @@
         "让调度器输出能够驱动底层执行器推进"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-05-crux-baseline",

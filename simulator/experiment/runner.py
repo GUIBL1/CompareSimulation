@@ -6,6 +6,7 @@ from pathlib import Path
 from simulator.config.loaders import load_experiment_config
 from simulator.config.loaders import load_topology_config
 from simulator.config.loaders import load_workload_config
+from simulator.core.engine import RuntimeEngine
 from simulator.core.models import RuntimeState
 from simulator.schedulers.base import Scheduler
 from simulator.schedulers.crux import CruxScheduler
@@ -20,16 +21,29 @@ class ExperimentRunner:
     experiment_file: Path
 
     def load_inputs(self) -> tuple[RuntimeState, Scheduler]:
-        experiment = load_experiment_config(self.experiment_file)
+        experiment = self._load_experiment_config()
         topology_config = load_topology_config(experiment.inputs.topology_file)
         workload_config = load_workload_config(experiment.inputs.workload_file)
         topology = build_topology(topology_config)
         jobs = [build_unified_job(job) for job in workload_config.jobs]
         runtime = RuntimeState(now_ms=0.0, topology=topology, active_jobs=jobs)
+        runtime.metadata["experiment_name"] = experiment.meta.name
         scheduler = self._create_scheduler(experiment.scheduler)
         for job in jobs:
             scheduler.on_workload_arrival(job, runtime)
         return runtime, scheduler
+
+    def run(self) -> RuntimeState:
+        experiment = self._load_experiment_config()
+        runtime, scheduler = self.load_inputs()
+        engine = RuntimeEngine(
+            max_time_ms=experiment.simulation.max_time_ms,
+            bandwidth_sharing_model=experiment.simulation.bandwidth_sharing_model,
+        )
+        return engine.run(runtime, scheduler, experiment)
+
+    def _load_experiment_config(self):
+        return load_experiment_config(self.experiment_file)
 
     def _create_scheduler(self, scheduler_config) -> Scheduler:
         if scheduler_config.type == "crux":
