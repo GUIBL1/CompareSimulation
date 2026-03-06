@@ -1,0 +1,160 @@
+{
+  "features": [
+    {
+      "id": "stage-01-config-contracts",
+      "category": "phase-1-foundation",
+      "description": "完成 topology、workload、experiment 三类配置文件的数据契约、校验规则与路径解析约定",
+      "steps": [
+        "验证 topology 配置必须通过文件提供主机数、交换机数、网络结构、链路带宽、链路时延等核心字段",
+        "验证 workload 配置能够同时表达 CRUX 所需作业级字段和 TE-CCL 所需 collective/chunk 字段",
+        "验证 experiment 配置按 crux 和 teccl 独立参数块组织，不允许混参",
+        "为缺省字段定义默认值和报错规则"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-02-topology-loader-builder",
+      "category": "phase-1-foundation",
+      "description": "完成拓扑加载器与构建器，支持 generated 和 explicit 两种模式，并生成统一 TopologyGraph",
+      "steps": [
+        "实现显式节点和显式链路加载",
+        "实现生成式拓扑展开接口，至少稳定支持一种基线拓扑",
+        "把链路带宽、时延、单双向属性和约束条件映射到内部对象",
+        "为节点对生成候选路径接口"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-03-unified-workload-model",
+      "category": "phase-1-foundation",
+      "description": "完成统一工作负载模型，使同一输入既能驱动 CRUX，也能驱动 TE-CCL",
+      "steps": [
+        "将 job 配置转换为 UnifiedJob、CommunicationDemand 和 Chunk",
+        "定义 collective 类型、chunk 划分和 dependency_mode 的内部语义",
+        "保留 compute_phase_ms 以支撑 CRUX intensity 估计",
+        "保留 chunk_count 和参与节点集合以支撑 TE-CCL epoch/chunk 调度"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-04-runtime-engine-baseline",
+      "category": "phase-2-simulation-core",
+      "description": "完成最小可运行的离散事件执行器和链路共享基线",
+      "steps": [
+        "实现 RuntimeState、LinkState、FlowState 的生命周期更新",
+        "实现事件队列、时间推进和基础链路占用逻辑",
+        "实现链路带宽共享近似模型，例如 max-min fair",
+        "让调度器输出能够驱动底层执行器推进"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-05-crux-baseline",
+      "category": "phase-3-scheduler-crux",
+      "description": "完成 CRUX 基线版本，使其能在统一平台上输出优先级和路径决策",
+      "steps": [
+        "根据 compute_phase_ms 和观测通信时间计算 intensity 分数",
+        "按 intensity 排序并映射优先级",
+        "实现候选路径选择接口和优先级压缩逻辑",
+        "在最小实验上验证 CRUX 能输出稳定决策"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-06-teccl-semantics",
+      "category": "phase-4-scheduler-teccl",
+      "description": "完成 TE-CCL 的核心语义建模，不将其退化为普通 job-level 路由",
+      "steps": [
+        "实现 epoch、chunk、flow 和 buffer 的内部状态表示",
+        "明确 GPU 可复制且有 buffer，交换机不可复制且不承担长期 buffer",
+        "将链路传播时延折算到 epoch 约束中",
+        "统一输出 epoch_actions，而不是只输出静态路径"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-07-teccl-small-scale-solver",
+      "category": "phase-4-scheduler-teccl",
+      "description": "完成 TE-CCL 小规模可验证求解后端，用于检验语义和最小实验",
+      "steps": [
+        "实现 small_scale_debug_solver 或等价小规模精确后端",
+        "在求解中区分 GPU 流守恒和交换机流守恒",
+        "验证 GPU 复制语义不会被误写成 incoming 等于 outgoing",
+        "将求解结果转换为统一 epoch_actions"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-08-teccl-heuristic-backend",
+      "category": "phase-4-scheduler-teccl",
+      "description": "完成 TE-CCL 中大规模启发式后端，保证在统一接口下可运行",
+      "steps": [
+        "设计启发式动作生成器，保持 chunk/epoch 语义不变",
+        "复用 TE-CCL 的统一状态模型和输出格式",
+        "对比 small-scale 求解后端和启发式后端的行为差异",
+        "记录启发式后端的适用范围和误差边界"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "stage-09-runner-and-metrics",
+      "category": "phase-5-experiment-system",
+      "description": "完成实验组装、批量运行与指标导出",
+      "steps": [
+        "实现 experiment runner 的 run 和 export_results 主路径",
+        "导出通用指标、CRUX 指标和 TE-CCL 指标",
+        "记录链路负载时间序列和调度器调试状态",
+        "保证输出结果可复用到后续绘图和对比分析"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-10-minimal-end-to-end-experiments",
+      "category": "phase-6-validation",
+      "description": "跑通最小可运行实验，验证统一底座、CRUX 和 TE-CCL 都能执行",
+      "steps": [
+        "用最小拓扑和最小 workload 跑通 CRUX",
+        "用同一组公共环境参数跑通 TE-CCL",
+        "检查两类调度器都能生成可消费的统一输出",
+        "确认结果目录中具备基础日志和指标文件"
+      ],
+      "priority": "high",
+      "passes": false
+    },
+    {
+      "id": "stage-11-fair-comparison-matrix",
+      "category": "phase-6-validation",
+      "description": "建立公平对比实验矩阵并固化公共参数控制规则",
+      "steps": [
+        "固定拓扑文件、链路参数、数据规模、chunk 粒度和随机种子",
+        "定义 CRUX 和 TE-CCL 可变化的算法私有参数范围",
+        "实现规模扩展、负载敏感性和参数敏感性实验清单",
+        "记录每组实验的可重复运行条件"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "stage-12-reporting-and-handoff",
+      "category": "phase-7-project-hardening",
+      "description": "完成结果归因、开发交接和长期迭代所需文档",
+      "steps": [
+        "整理结果归因输出，包括链路曲线、阶段耗时和 epoch 动作摘要",
+        "更新 progress.md 和记载关键设计决策",
+        "保证 prompt.md、feature_list.json 和 plan.md 一致",
+        "为后续上下文窗口留下明确下一步"
+      ],
+      "priority": "medium",
+      "passes": false
+    }
+  ]
+}
