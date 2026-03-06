@@ -24,6 +24,28 @@
 - 文件: simulator/schedulers/crux.py, feature_list.json, progress.md
 - 状态: ✅ 已完成
 
+## 2026-03-06 TE-CCL 语义阶段
+- 实现: 完成 stage-06-teccl-semantics。
+- 文件: simulator/schedulers/base.py, simulator/schedulers/teccl.py, simulator/core/engine.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 为 TE-CCL 增加内部状态模型，显式表示 job 级 epoch 状态、chunk replica、GPU buffer、交换机瞬时到达状态和 in-flight 目标。
+- 将 GPU 与交换机的语义分开实现：GPU 支持复制并可持久保留 chunk buffer，交换机不支持复制且只在到达 epoch 参与瞬时转发。
+- 将链路 latency_us 折算为 expected_arrival_epoch，并把该信息写入 epoch_actions 和 runtime flow metadata。
+- 将 TE-CCL 输出固定为带 metadata 的 epoch_actions，而不是退化回普通 job-level path 分配。
+- 修正 runtime bridge：TE-CCL 在空 epoch 时不再错误回退到 CRUX 风格的 job-level flow 物化。
+
+### 验证结果
+- 在 direct GPU 三节点拓扑上验证了 GPU 复制语义：同一 epoch 内，source GPU 可同时向两个目的 GPU 发起动作，两个动作的 expected_arrival_epoch 都正确为 2。
+- 在 GPU-switch-GPU 拓扑上验证了交换机无长期 buffer 语义：epoch 0 为 GPU 到交换机，epoch 1 为交换机到目的 GPU，epoch 2 时旧的交换机到达状态不会继续保留并触发转发。
+- 在上述验证中，链路 1500 us 和 1000 us 时延均已正确折算为 epoch 到达约束。
+- 对 runtime bridge 做回归检查后，TE-CCL 执行过程中不再出现错误的 job-level fallback flow。
+
+### 下一步建议
+- 进入 stage-07-teccl-small-scale-solver，基于当前语义状态补 small_scale_debug_solver 或等价小规模精确后端。
+- 在求解后端中显式区分 GPU 流守恒与交换机流守恒，并把求解结果稳定转换为统一 epoch_actions。
+
 ### 本次改动
 - 为 CRUX 增加 observed_comm_time 的作业级刷新逻辑，基于通信窗口而不是单 flow 平均耗时更新 intensity 估计。
 - 将作业按 intensity、到达时间和 job_id 做稳定排序，并将 rank 压缩到有限 priority level。
@@ -132,11 +154,12 @@
 - 已完成统一工作负载语义转换，覆盖 chunk 切分、collective 源宿集合和 dependency_mode 归一化。
 - 已完成最小离散事件执行器、链路带宽共享基线和 runner.run 主路径。
 - 已完成 CRUX 基线的 intensity 排序、priority 压缩和 candidate path 选择。
-- TE-CCL 深化语义、小规模求解器和指标导出尚未完成。
+- 已完成 TE-CCL 的 epoch/chunk/buffer 语义和 GPU/交换机差异化状态表示。
+- TE-CCL 小规模求解器和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-06-teccl-semantics，补齐 TE-CCL 的 epoch、buffer 和节点类型差异语义。
-- 然后完成 TE-CCL 小规模求解后端。
+- 优先完成 stage-07-teccl-small-scale-solver，补齐小规模可验证求解后端。
+- 然后完成实验指标导出和结果系统。
 
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。

@@ -76,7 +76,7 @@
         "统一输出 epoch_actions，而不是只输出静态路径"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-07-teccl-small-scale-solver",

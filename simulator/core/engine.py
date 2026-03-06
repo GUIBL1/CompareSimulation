@@ -110,10 +110,11 @@ class RuntimeEngine:
                 if flow.owner_job_id == job_id and flow.status != "completed":
                     flow.priority = priority
 
+        scheduler_name = str(decision.metadata.get("scheduler", ""))
         if decision.epoch_actions:
             for action in decision.epoch_actions:
                 self._materialize_epoch_action(runtime, action)
-        else:
+        elif scheduler_name != "teccl":
             for job in runtime.active_jobs:
                 self._materialize_job_flows(runtime, job, decision)
 
@@ -127,7 +128,7 @@ class RuntimeEngine:
         self._recompute_link_allocations(runtime)
 
     def _materialize_epoch_action(self, runtime: RuntimeState, action: EpochAction) -> None:
-        flow_id = f"epoch::{action.chunk_id}::{action.source_gpu}->{action.next_node}"
+        flow_id = f"epoch::{action.chunk_id}::{action.current_node}->{action.next_node}::{action.source_gpu}"
         if flow_id in runtime.flow_states:
             return
         path = self._resolve_route_fragment(runtime, action.current_node, action.next_node, action.route_fragment)
@@ -148,7 +149,12 @@ class RuntimeEngine:
             start_time_ms=runtime.now_ms,
             path=path,
             traversed_link_ids=self._path_to_link_ids(path),
-            metadata={"epoch_index": action.epoch_index, "synthetic": False},
+            metadata={
+                "epoch_index": action.epoch_index,
+                "expected_arrival_epoch": action.expected_arrival_epoch,
+                "scheduler": "teccl",
+                **dict(action.metadata),
+            },
         )
 
     def _materialize_job_flows(self, runtime: RuntimeState, job: UnifiedJob, decision: ScheduleDecision) -> None:

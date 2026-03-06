@@ -18,6 +18,7 @@ class EpochAction:
     next_node: str
     expected_arrival_epoch: int
     route_fragment: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
