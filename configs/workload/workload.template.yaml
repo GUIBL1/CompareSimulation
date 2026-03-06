@@ -1,0 +1,20 @@
+meta:
+  name: example_workload
+  version: 1
+  description: unified workload input for crux and te-ccl
+
+jobs:
+  - job_id: job_001
+    arrival_time_ms: 0
+    participants:
+      - gpu_0
+      - gpu_1
+      - gpu_2
+      - gpu_3
+    communication_pattern: all_reduce
+    total_data_mb: 1024
+    chunk_count: 16
+    compute_phase_ms: 20
+    iteration_count: 100
+    repeat_interval_ms: 25
+    dependency_mode: strict
