@@ -19,6 +19,27 @@
 - 文件: simulator/core/models.py, simulator/core/engine.py, simulator/core/__init__.py, simulator/experiment/runner.py, configs/workload/workload.template.yaml, feature_list.json, progress.md
 - 状态: ✅ 已完成
 
+## 2026-03-06 CRUX 基线阶段
+- 实现: 完成 stage-05-crux-baseline。
+- 文件: simulator/schedulers/crux.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 为 CRUX 增加 observed_comm_time 的作业级刷新逻辑，基于通信窗口而不是单 flow 平均耗时更新 intensity 估计。
+- 将作业按 intensity、到达时间和 job_id 做稳定排序，并将 rank 压缩到有限 priority level。
+- 为每条 flow 增加候选路径选择逻辑，按链路利用率、路径争用和路径长度选择更优路径。
+- 为 CRUX 增加路径缓存和调试状态导出，保证相同输入下 path_assignments 稳定。
+
+### 验证结果
+- 通过 experiment.template.yaml 的 CRUX 基线实验验证，schedule_history 中已稳定输出 intensity_scores、priority_assignments 和 192 条 path_assignments。
+- 在双作业冒烟实验中，compute_phase_ms 更高的 job_fast 获得更高优先级，priority_assignments 为 {'job_fast': 0, 'job_slow': 1}。
+- 同一运行时输入下连续两次 compute_schedule 得到一致的 path_assignments，稳定性验证通过。
+- observed_comm_time 修正后，模板实验中的 intensity 不再异常放大，而是回落到合理的作业级通信时间量级。
+
+### 下一步建议
+- 进入 stage-06-teccl-semantics，补齐 epoch、chunk、flow、buffer 的显式状态表示。
+- 把 GPU 可复制且有 buffer、交换机不可复制且无长期 buffer 的 TE-CCL 语义真正映射到内部运行时对象上。
+
 ### 本次改动
 - 扩展 RuntimeState、FlowState、LinkState，并新增 RuntimeEvent，补齐 flow、link 和作业生命周期所需的运行时状态。
 - 新增 simulator/core/engine.py，实现最小事件驱动执行器、事件队列、时间推进、完成事件处理和作业完成判定。
@@ -110,11 +131,12 @@
 - 已完成 topology builder 的 generated/explicit 双模式构建与候选路径枚举。
 - 已完成统一工作负载语义转换，覆盖 chunk 切分、collective 源宿集合和 dependency_mode 归一化。
 - 已完成最小离散事件执行器、链路带宽共享基线和 runner.run 主路径。
-- CRUX 路径逻辑、TE-CCL 小规模求解器和指标导出尚未完成。
+- 已完成 CRUX 基线的 intensity 排序、priority 压缩和 candidate path 选择。
+- TE-CCL 深化语义、小规模求解器和指标导出尚未完成。
 
 ### 下一步建议
-- 优先完成 stage-05-crux-baseline，补齐 CRUX 的路径选择和优先级压缩逻辑。
-- 然后分别补齐 CRUX 基线和 TE-CCL 小规模求解后端。
+- 优先完成 stage-06-teccl-semantics，补齐 TE-CCL 的 epoch、buffer 和节点类型差异语义。
+- 然后完成 TE-CCL 小规模求解后端。
 
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。

@@ -63,7 +63,7 @@
         "在最小实验上验证 CRUX 能输出稳定决策"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-06-teccl-semantics",
