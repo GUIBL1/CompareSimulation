@@ -226,6 +226,27 @@
 - 进入 stage-10-minimal-end-to-end-experiments，分别用公共环境参数跑通 CRUX 与 TE-CCL 的最小实验。
 - 检查结果目录中的统一指标文件是否已足够支撑后续实验矩阵与对比图表。
 
+## 2026-03-07 最小端到端实验阶段
+- 实现: 完成 stage-10-minimal-end-to-end-experiments。
+- 文件: configs/topology/minimal_e2e_topology.yaml, configs/workload/minimal_e2e_workload.yaml, configs/experiment/minimal_crux_e2e.yaml, configs/experiment/minimal_teccl_e2e.yaml, simulator/experiment/runner.py, simulator/core/engine.py, simulator/schedulers/teccl.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 新增共享的最小 explicit 拓扑 [configs/topology/minimal_e2e_topology.yaml](configs/topology/minimal_e2e_topology.yaml) 和共享工作负载 [configs/workload/minimal_e2e_workload.yaml](configs/workload/minimal_e2e_workload.yaml)，让 CRUX 与 TE-CCL 在完全相同的公共输入下执行。
+- 新增两个最小实验入口 [configs/experiment/minimal_crux_e2e.yaml](configs/experiment/minimal_crux_e2e.yaml) 与 [configs/experiment/minimal_teccl_e2e.yaml](configs/experiment/minimal_teccl_e2e.yaml)，只切换 scheduler 类型与输出目录，不改变公共环境参数。
+- 为 TE-CCL end-to-end 路径补齐 solver 结果到内部状态的回写逻辑，并修正实际流完成时的 arrival epoch 同步与 job 完成判定，确保 epoch_actions 能真正落成统一 flow 输出。
+- 为 runtime metadata 增加 scheduler_type，避免 TE-CCL 被错误套用 CRUX 式“所有 flow 完成即 job 完成”的终止条件。
+
+### 验证结果
+- 在 networkSimulation 环境中用 [configs/experiment/minimal_crux_e2e.yaml](configs/experiment/minimal_crux_e2e.yaml) 跑通 CRUX 最小实验，结果目录 [results/minimal_crux_e2e](results/minimal_crux_e2e) 已生成 summary、flow_trace、scheduler_debug、link_load_trace 和 schedule_history 文件；作业在 15.36 ms 完成，共输出 4 条统一 flow。
+- 在相同 topology 与 workload 下用 [configs/experiment/minimal_teccl_e2e.yaml](configs/experiment/minimal_teccl_e2e.yaml) 跑通 TE-CCL 最小实验，结果目录 [results/minimal_teccl_e2e](results/minimal_teccl_e2e) 已生成同构结果文件；作业在 40.0 ms 完成，共输出 10 条统一 flow，summary 中 teccl_completed_replica_count 为 2。
+- CRUX 的 [results/minimal_crux_e2e/scheduler_debug.json](results/minimal_crux_e2e/scheduler_debug.json) 已稳定记录 priority_assignments 与 path_assignments；TE-CCL 的 [results/minimal_teccl_e2e/scheduler_debug.json](results/minimal_teccl_e2e/scheduler_debug.json) 已记录 completed_replica_ids、solver_reports 和逐 epoch 的状态演化。
+- 两类调度器都通过 runner.export_results 生成了统一 summary.json、summary.csv、link_load_trace.csv、flow_trace.csv 和 schedule_history.json，可直接供后续对比矩阵与图表消费。
+
+### 下一步建议
+- 进入 stage-11-fair-comparison-matrix，固定公共拓扑、链路参数、数据规模、chunk 粒度和随机种子，开始构造公平对比矩阵。
+- 将 minimal_e2e 这组实验作为后续回归基线，避免后续扩展破坏 CRUX 和 TE-CCL 的统一输出契约。
+
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。
 - 任何新的上下文窗口开始工作前，必须先读取 prompt.md、progress.md、feature_list.json 和 plan.md。

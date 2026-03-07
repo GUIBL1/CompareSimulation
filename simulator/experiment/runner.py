@@ -47,6 +47,7 @@ class ExperimentRunner:
         jobs = [build_unified_job(job) for job in workload_config.jobs]
         runtime = RuntimeState(now_ms=0.0, topology=topology, active_jobs=jobs)
         runtime.metadata["experiment_name"] = experiment.meta.name
+        runtime.metadata["scheduler_type"] = experiment.scheduler.type
         scheduler = self._create_scheduler(experiment.scheduler)
         for job in jobs:
             scheduler.on_workload_arrival(job, runtime)

@@ -128,7 +128,7 @@
         "确认结果目录中具备基础日志和指标文件"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-11-fair-comparison-matrix",

@@ -1,0 +1,19 @@
+meta:
+  name: minimal_e2e_workload
+  version: 1
+  description: minimal shared workload for crux and teccl end-to-end validation
+
+jobs:
+  - job_id: job_minimal_broadcast
+    arrival_time_ms: 0
+    participants:
+      - gpu_0
+      - gpu_1
+      - gpu_2
+    communication_pattern: broadcast
+    total_data_mb: 96
+    chunk_count: 2
+    compute_phase_ms: 8
+    iteration_count: 1
+    repeat_interval_ms: 0
+    dependency_mode: strict

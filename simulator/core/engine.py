@@ -102,6 +102,7 @@ class RuntimeEngine:
                         "epoch_action_count": len(decision.epoch_actions),
                     }
                 )
+                self._update_completed_jobs_from_decision(runtime, decision)
                 if decision.valid_until_ms > runtime.now_ms + 1e-9:
                     self._push_event(runtime, decision.valid_until_ms, "schedule", {"reason": "decision_expiry"})
 
@@ -129,7 +130,12 @@ class RuntimeEngine:
         self._recompute_link_allocations(runtime)
 
     def _materialize_epoch_action(self, runtime: RuntimeState, action: EpochAction) -> None:
-        flow_id = f"epoch::{action.chunk_id}::{action.current_node}->{action.next_node}::{action.source_gpu}"
+        replica_id = str(action.metadata.get("replica_id", ""))
+        ultimate_destination = str(action.metadata.get("ultimate_destination", action.next_node))
+        flow_id = (
+            f"epoch::{action.chunk_id}::{replica_id}::{action.current_node}->{action.next_node}"
+            f"::{ultimate_destination}::{action.source_gpu}"
+        )
         if flow_id in runtime.flow_states:
             return
         path = self._resolve_route_fragment(runtime, action.current_node, action.next_node, action.route_fragment)
@@ -310,6 +316,8 @@ class RuntimeEngine:
         return completed_any
 
     def _mark_completed_jobs(self, runtime: RuntimeState) -> None:
+        if runtime.metadata.get("scheduler_type") == "teccl":
+            return
         for job in runtime.active_jobs:
             if job.job_id in runtime.completed_job_ids:
                 continue
@@ -357,3 +365,21 @@ class RuntimeEngine:
                     last_snapshot["reason"] = reason
                     continue
             link_state.utilization_history.append(snapshot)
+
+    def _update_completed_jobs_from_decision(self, runtime: RuntimeState, decision: ScheduleDecision) -> None:
+        if decision.metadata.get("scheduler") != "teccl":
+            return
+        job_states = decision.metadata.get("job_states", {})
+        for job_id, job_state in job_states.items():
+            if job_id in runtime.completed_job_ids:
+                continue
+            chunk_replicas = job_state.get("chunk_replicas", {})
+            if not chunk_replicas:
+                continue
+            if all(
+                not replica_state.get("pending_destinations")
+                and not replica_state.get("inflight_destinations")
+                and not replica_state.get("switch_arrivals")
+                for replica_state in chunk_replicas.values()
+            ):
+                runtime.completed_job_ids.append(job_id)

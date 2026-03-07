@@ -77,6 +77,7 @@ class TECCLScheduler(Scheduler):
             job_state.current_epoch = current_epoch
             self._synchronize_job_state(job_state, runtime_state, current_epoch)
             solver_result = self._solve_job_epoch(job, job_state, runtime_state, current_epoch)
+            self._apply_solver_result(job_state, solver_result)
             epoch_actions.extend(solver_result.epoch_actions)
             solver_reports[job.job_id] = {
                 "metadata": solver_result.metadata,
@@ -243,6 +244,24 @@ class TECCLScheduler(Scheduler):
                     break
         return actions
 
+    def _apply_solver_result(self, job_state: TECCLJobState, solver_result) -> None:
+        for candidate in solver_result.selected_candidates:
+            replica_state = job_state.chunk_replicas.get(candidate.replica_id)
+            if replica_state is None:
+                continue
+            replica_state.inflight_destinations[candidate.ultimate_destination] = candidate.expected_arrival_epoch
+            replica_state.last_epoch_actions.append(
+                {
+                    "epoch": job_state.current_epoch,
+                    "current_node": candidate.current_node,
+                    "next_node": candidate.next_node,
+                    "ultimate_destination": candidate.ultimate_destination,
+                    "node_kind": candidate.node_kind,
+                }
+            )
+            if candidate.node_kind == "switch":
+                replica_state.switch_arrivals.pop(candidate.current_node, None)
+
     def _build_job_state(self, job: UnifiedJob) -> TECCLJobState:
         job_state = TECCLJobState(job_id=job.job_id)
         for demand in job.communication_demands:
@@ -281,7 +300,8 @@ class TECCLScheduler(Scheduler):
             arrival_node = flow.destination_node or flow.current_node
             if arrival_node is None:
                 continue
-            arrival_epoch = int(flow.metadata.get("expected_arrival_epoch", current_epoch))
+            expected_arrival_epoch = int(flow.metadata.get("expected_arrival_epoch", current_epoch))
+            arrival_epoch = max(current_epoch, expected_arrival_epoch)
             node_type = self._node_type(runtime_state, arrival_node)
             if node_type == "gpu" and self.strategy.enable_gpu_buffer:
                 replica_state.gpu_buffers[arrival_node] = min(replica_state.gpu_buffers.get(arrival_node, arrival_epoch), arrival_epoch)
