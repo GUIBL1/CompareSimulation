@@ -1,0 +1,491 @@
+meta:
+  name: inter_dc_dual_fabric_topology
+  version: 1
+  description: explicit two-datacenter topology recreated from topology_inter_DC.txt
+
+topology:
+  mode: explicit
+  type: inter_dc_dual_fabric
+  parameters:
+    source_file: topology_inter_DC.txt
+    datacenter_count: 2
+    gpu_count: 16
+    switch_count: 42
+
+nodes:
+  host_count: 0
+  switch_count: 42
+  gpu_per_host: 0
+  explicit_nodes:
+    - node_id: gpu_0
+      node_type: gpu
+      original_id: 0
+      dc: dc_0
+    - node_id: gpu_1
+      node_type: gpu
+      original_id: 1
+      dc: dc_0
+    - node_id: gpu_2
+      node_type: gpu
+      original_id: 2
+      dc: dc_0
+    - node_id: gpu_3
+      node_type: gpu
+      original_id: 3
+      dc: dc_0
+    - node_id: gpu_4
+      node_type: gpu
+      original_id: 4
+      dc: dc_0
+    - node_id: gpu_5
+      node_type: gpu
+      original_id: 5
+      dc: dc_0
+    - node_id: gpu_6
+      node_type: gpu
+      original_id: 6
+      dc: dc_0
+    - node_id: gpu_7
+      node_type: gpu
+      original_id: 7
+      dc: dc_0
+    - node_id: gpu_8
+      node_type: gpu
+      original_id: 8
+      dc: dc_1
+    - node_id: gpu_9
+      node_type: gpu
+      original_id: 9
+      dc: dc_1
+    - node_id: gpu_10
+      node_type: gpu
+      original_id: 10
+      dc: dc_1
+    - node_id: gpu_11
+      node_type: gpu
+      original_id: 11
+      dc: dc_1
+    - node_id: gpu_12
+      node_type: gpu
+      original_id: 12
+      dc: dc_1
+    - node_id: gpu_13
+      node_type: gpu
+      original_id: 13
+      dc: dc_1
+    - node_id: gpu_14
+      node_type: gpu
+      original_id: 14
+      dc: dc_1
+    - node_id: gpu_15
+      node_type: gpu
+      original_id: 15
+      dc: dc_1
+    - node_id: tor_0
+      node_type: switch
+      original_id: 16
+      role: leaf
+      dc: dc_0
+    - node_id: tor_1
+      node_type: switch
+      original_id: 17
+      role: leaf
+      dc: dc_0
+    - node_id: tor_2
+      node_type: switch
+      original_id: 18
+      role: leaf
+      dc: dc_0
+    - node_id: tor_3
+      node_type: switch
+      original_id: 19
+      role: leaf
+      dc: dc_0
+    - node_id: tor_4
+      node_type: switch
+      original_id: 20
+      role: leaf
+      dc: dc_0
+    - node_id: tor_5
+      node_type: switch
+      original_id: 21
+      role: leaf
+      dc: dc_0
+    - node_id: tor_6
+      node_type: switch
+      original_id: 22
+      role: leaf
+      dc: dc_0
+    - node_id: tor_7
+      node_type: switch
+      original_id: 23
+      role: leaf
+      dc: dc_0
+    - node_id: tor_8
+      node_type: switch
+      original_id: 24
+      role: leaf
+      dc: dc_1
+    - node_id: tor_9
+      node_type: switch
+      original_id: 25
+      role: leaf
+      dc: dc_1
+    - node_id: tor_10
+      node_type: switch
+      original_id: 26
+      role: leaf
+      dc: dc_1
+    - node_id: tor_11
+      node_type: switch
+      original_id: 27
+      role: leaf
+      dc: dc_1
+    - node_id: tor_12
+      node_type: switch
+      original_id: 28
+      role: leaf
+      dc: dc_1
+    - node_id: tor_13
+      node_type: switch
+      original_id: 29
+      role: leaf
+      dc: dc_1
+    - node_id: tor_14
+      node_type: switch
+      original_id: 30
+      role: leaf
+      dc: dc_1
+    - node_id: tor_15
+      node_type: switch
+      original_id: 31
+      role: leaf
+      dc: dc_1
+    - node_id: agg_0
+      node_type: switch
+      original_id: 32
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_1
+      node_type: switch
+      original_id: 33
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_2
+      node_type: switch
+      original_id: 34
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_3
+      node_type: switch
+      original_id: 35
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_4
+      node_type: switch
+      original_id: 36
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_5
+      node_type: switch
+      original_id: 37
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_6
+      node_type: switch
+      original_id: 38
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_7
+      node_type: switch
+      original_id: 39
+      role: aggregation
+      dc: dc_0
+    - node_id: agg_8
+      node_type: switch
+      original_id: 40
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_9
+      node_type: switch
+      original_id: 41
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_10
+      node_type: switch
+      original_id: 42
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_11
+      node_type: switch
+      original_id: 43
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_12
+      node_type: switch
+      original_id: 44
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_13
+      node_type: switch
+      original_id: 45
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_14
+      node_type: switch
+      original_id: 46
+      role: aggregation
+      dc: dc_1
+    - node_id: agg_15
+      node_type: switch
+      original_id: 47
+      role: aggregation
+      dc: dc_1
+    - node_id: core_0
+      node_type: switch
+      original_id: 48
+      role: core
+      dc: dc_0
+    - node_id: core_1
+      node_type: switch
+      original_id: 49
+      role: core
+      dc: dc_0
+    - node_id: core_2
+      node_type: switch
+      original_id: 50
+      role: core
+      dc: dc_0
+    - node_id: core_3
+      node_type: switch
+      original_id: 51
+      role: core
+      dc: dc_0
+    - node_id: core_4
+      node_type: switch
+      original_id: 52
+      role: core
+      dc: dc_1
+    - node_id: core_5
+      node_type: switch
+      original_id: 53
+      role: core
+      dc: dc_1
+    - node_id: core_6
+      node_type: switch
+      original_id: 54
+      role: core
+      dc: dc_1
+    - node_id: core_7
+      node_type: switch
+      original_id: 55
+      role: core
+      dc: dc_1
+    - node_id: gateway_0
+      node_type: switch
+      original_id: 56
+      role: inter_dc_gateway
+      dc: dc_0
+    - node_id: gateway_1
+      node_type: switch
+      original_id: 57
+      role: inter_dc_gateway
+      dc: dc_1
+
+links:
+  default_bandwidth_gbps: 100
+  default_latency_us: 1
+  bidirectional: true
+  explicit_links:
+    - src: gpu_0
+      dst: tor_0
+    - src: gpu_1
+      dst: tor_1
+    - src: gpu_2
+      dst: tor_2
+    - src: gpu_3
+      dst: tor_3
+    - src: gpu_4
+      dst: tor_4
+    - src: gpu_5
+      dst: tor_5
+    - src: gpu_6
+      dst: tor_6
+    - src: gpu_7
+      dst: tor_7
+    - src: gpu_8
+      dst: tor_8
+    - src: gpu_9
+      dst: tor_9
+    - src: gpu_10
+      dst: tor_10
+    - src: gpu_11
+      dst: tor_11
+    - src: gpu_12
+      dst: tor_12
+    - src: gpu_13
+      dst: tor_13
+    - src: gpu_14
+      dst: tor_14
+    - src: gpu_15
+      dst: tor_15
+    - src: tor_0
+      dst: agg_0
+    - src: tor_0
+      dst: agg_1
+    - src: tor_1
+      dst: agg_0
+    - src: tor_1
+      dst: agg_1
+    - src: tor_2
+      dst: agg_2
+    - src: tor_2
+      dst: agg_3
+    - src: tor_3
+      dst: agg_2
+    - src: tor_3
+      dst: agg_3
+    - src: tor_4
+      dst: agg_4
+    - src: tor_4
+      dst: agg_5
+    - src: tor_5
+      dst: agg_4
+    - src: tor_5
+      dst: agg_5
+    - src: tor_6
+      dst: agg_6
+    - src: tor_6
+      dst: agg_7
+    - src: tor_7
+      dst: agg_6
+    - src: tor_7
+      dst: agg_7
+    - src: tor_8
+      dst: agg_8
+    - src: tor_8
+      dst: agg_9
+    - src: tor_9
+      dst: agg_8
+    - src: tor_9
+      dst: agg_9
+    - src: tor_10
+      dst: agg_10
+    - src: tor_10
+      dst: agg_11
+    - src: tor_11
+      dst: agg_10
+    - src: tor_11
+      dst: agg_11
+    - src: tor_12
+      dst: agg_12
+    - src: tor_12
+      dst: agg_13
+    - src: tor_13
+      dst: agg_12
+    - src: tor_13
+      dst: agg_13
+    - src: tor_14
+      dst: agg_14
+    - src: tor_14
+      dst: agg_15
+    - src: tor_15
+      dst: agg_14
+    - src: tor_15
+      dst: agg_15
+    - src: agg_0
+      dst: core_0
+    - src: agg_0
+      dst: core_1
+    - src: agg_1
+      dst: core_2
+    - src: agg_1
+      dst: core_3
+    - src: agg_2
+      dst: core_0
+    - src: agg_2
+      dst: core_1
+    - src: agg_3
+      dst: core_2
+    - src: agg_3
+      dst: core_3
+    - src: agg_4
+      dst: core_0
+    - src: agg_4
+      dst: core_1
+    - src: agg_5
+      dst: core_2
+    - src: agg_5
+      dst: core_3
+    - src: agg_6
+      dst: core_0
+    - src: agg_6
+      dst: core_1
+    - src: agg_7
+      dst: core_2
+    - src: agg_7
+      dst: core_3
+    - src: agg_8
+      dst: core_4
+    - src: agg_8
+      dst: core_5
+    - src: agg_9
+      dst: core_6
+    - src: agg_9
+      dst: core_7
+    - src: agg_10
+      dst: core_4
+    - src: agg_10
+      dst: core_5
+    - src: agg_11
+      dst: core_6
+    - src: agg_11
+      dst: core_7
+    - src: agg_12
+      dst: core_4
+    - src: agg_12
+      dst: core_5
+    - src: agg_13
+      dst: core_6
+    - src: agg_13
+      dst: core_7
+    - src: agg_14
+      dst: core_4
+    - src: agg_14
+      dst: core_5
+    - src: agg_15
+      dst: core_6
+    - src: agg_15
+      dst: core_7
+    - src: core_0
+      dst: gateway_0
+    - src: core_1
+      dst: gateway_0
+    - src: core_2
+      dst: gateway_0
+    - src: core_3
+      dst: gateway_0
+    - src: core_4
+      dst: gateway_1
+    - src: core_5
+      dst: gateway_1
+    - src: core_6
+      dst: gateway_1
+    - src: core_7
+      dst: gateway_1
+    - src: gateway_0
+      dst: gateway_1
+      latency_us: 5000
+      attributes:
+        inter_dc: true
+  overrides: []
+
+routing:
+  ecmp: true
+  max_paths_per_pair: 12
+  path_selection_mode: k_shortest
+
+constraints:
+  oversubscription_ratio: 1.0
+  switch_buffer_mb: 32
+  host_nic_bandwidth_gbps: 100

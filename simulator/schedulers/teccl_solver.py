@@ -99,9 +99,9 @@ class SmallScaleDebugSolver:
         reports: list[SolverConstraintReport] = []
 
         for switch_id, arrival_epoch in sorted(replica_state.switch_arrivals.items()):
-            incoming_count = 1 if arrival_epoch == current_epoch else 0
+            incoming_count = 1 if arrival_epoch <= current_epoch else 0
             feasible_candidates: list[SolverCandidateAction] = []
-            if arrival_epoch == current_epoch:
+            if arrival_epoch <= current_epoch:
                 for destination in self._pending_destinations(replica_state, current_epoch, switch_id, runtime_state, for_switch=True):
                     path = self._shortest_path(runtime_state, switch_id, destination)
                     if len(path) < 2:

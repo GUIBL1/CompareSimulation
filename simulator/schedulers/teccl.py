@@ -170,9 +170,7 @@ class TECCLScheduler(Scheduler):
 
             scheduled_from_switch = False
             for switch_id, arrival_epoch in list(replica_state.switch_arrivals.items()):
-                if arrival_epoch != current_epoch:
-                    if arrival_epoch < current_epoch:
-                        replica_state.switch_arrivals.pop(switch_id, None)
+                if arrival_epoch > current_epoch:
                     continue
                 next_destination = self._select_switch_destination(replica_state, current_epoch, switch_id, runtime_state)
                 if next_destination is None:
@@ -309,7 +307,10 @@ class TECCLScheduler(Scheduler):
                     replica_state.delivered_destinations.add(arrival_node)
                     replica_state.inflight_destinations.pop(arrival_node, None)
             elif node_type == "switch":
-                replica_state.switch_arrivals[arrival_node] = arrival_epoch
+                replica_state.switch_arrivals[arrival_node] = min(
+                    replica_state.switch_arrivals.get(arrival_node, arrival_epoch),
+                    arrival_epoch,
+                )
 
             if replica_state.destination_gpus.issubset(replica_state.delivered_destinations):
                 job_state.completed_replica_ids.add(replica_id)

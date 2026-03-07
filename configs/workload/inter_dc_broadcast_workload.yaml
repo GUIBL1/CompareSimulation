@@ -1,0 +1,25 @@
+meta:
+  name: inter_dc_broadcast_workload
+  version: 1
+  description: cross-datacenter broadcast from dc_0 into the remote dc_1 GPU set on the recreated dual-fabric topology
+
+jobs:
+  - job_id: inter_dc_broadcast
+    arrival_time_ms: 0
+    participants:
+      - gpu_0
+      - gpu_8
+      - gpu_9
+      - gpu_10
+      - gpu_11
+      - gpu_12
+      - gpu_13
+      - gpu_14
+      - gpu_15
+    communication_pattern: broadcast
+    total_data_mb: 48
+    chunk_count: 4
+    compute_phase_ms: 10
+    iteration_count: 1
+    repeat_interval_ms: 0
+    dependency_mode: independent
