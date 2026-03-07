@@ -8,9 +8,10 @@
 
 1. 读取 plan.md，理解整体架构、模块边界、TE-CCL 语义和文件化输入约束。
 2. 读取 progress.md，确认当前已经完成的工作、当前状态和下一步建议。
-3. 读取 feature_list.json，选择最高优先级且 passes 为 false 的一项作为当前会话唯一目标。
-4. 读取 configs 目录中的相关模板文件，确认输入契约没有被破坏。
-5. 如需开发代码，再读取 simulator 目录下与当前任务直接相关的模块。
+3. 读取 handoff.md，确认当前可复用的结果资产、关键设计决策和明确下一步。
+4. 读取 feature_list.json，选择最高优先级且 passes 为 false 的一项作为当前会话唯一目标。
+5. 读取 configs 目录中的相关模板文件，确认输入契约没有被破坏。
+6. 如需开发代码，再读取 simulator 目录下与当前任务直接相关的模块。
 
 ## 必须遵守的硬约束
 
@@ -41,5 +42,6 @@
 
 1. 确认代码处于一致状态，没有留下半写的接口或未解释的设计改动。
 2. 更新 progress.md，明确本次完成内容、验证情况和下一步。
-3. 如果某个 feature 已满足其 steps，再把 feature_list.json 中对应的 passes 更新为 true。
-4. 若遇到阻塞，必须在 progress.md 中明确记录阻塞原因和建议的解决方向。
+3. 如本次改动影响长期交接，更新 handoff.md 或重生成归因报告。
+4. 如果某个 feature 已满足其 steps，再把 feature_list.json 中对应的 passes 更新为 true。
+5. 若遇到阻塞，必须在 progress.md 中明确记录阻塞原因和建议的解决方向。

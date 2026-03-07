@@ -268,6 +268,27 @@
 - 进入 stage-12-reporting-and-handoff，整理当前最小实验和公平矩阵的结果归因视图，并把关键设计决策固化到交接文档中。
 - 如果下一步要开始批量跑矩阵，可基于 [simulator/experiment/matrix.py](simulator/experiment/matrix.py) 再补一个将矩阵条目物化为 experiment YAML 或直接驱动 runner 的批处理入口。
 
+## 2026-03-07 归因与交接阶段
+- 实现: 完成 stage-12-reporting-and-handoff。
+- 文件: simulator/metrics/reporting.py, simulator/metrics/__init__.py, handoff.md, prompt.md, plan.md, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 新增 [simulator/metrics/reporting.py](simulator/metrics/reporting.py)，可从结果目录中的 summary、scheduler_debug、schedule_history、link_load_trace 和 flow_trace 自动构建归因报告，并导出项目级 handoff 报告。
+- 新增根目录交接文件 [handoff.md](handoff.md)，明确当前完成状态、关键设计决策、直接可复用的入口和清晰的下一步。
+- 更新 [prompt.md](prompt.md)，将 handoff.md 纳入新上下文的标准读取顺序，并把“更新交接资产”纳入推荐会话结束动作。
+- 更新 [plan.md](plan.md)，补充交接与归因资产章节，保证 plan、prompt 与当前代码结构一致。
+
+### 验证结果
+- 在 networkSimulation 环境中基于 [results/minimal_crux_e2e](results/minimal_crux_e2e) 和 [results/minimal_teccl_e2e](results/minimal_teccl_e2e) 成功生成项目级交接报告，输出到 [results/project_handoff/project_handoff_report.json](results/project_handoff/project_handoff_report.json) 和 [results/project_handoff/project_handoff_report.md](results/project_handoff/project_handoff_report.md)。
+- 交接报告已覆盖 CRUX 和 TE-CCL 的完成时间、调度调用次数、链路热点摘要、阶段耗时和 epoch 动作样例。
+- 报告中已同步记录公平矩阵概况，包括公共案例数、参数扫频定义数、运行规格数和重复运行约束。
+- prompt、plan、feature_list 和 handoff 之间的交接顺序与职责说明已对齐，不再依赖口头约定。
+
+### 下一步建议
+- 如需真正执行公平矩阵，优先补一个矩阵批处理 runner，将 [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml) 直接驱动为批量实验。
+- 在跑出更多矩阵结果后，重复调用 reporting 模块，产出覆盖 scale_extension 与 load_sensitivity 的归因报告和图表输入。
+
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。
 - 任何新的上下文窗口开始工作前，必须先读取 prompt.md、progress.md、feature_list.json 和 plan.md。

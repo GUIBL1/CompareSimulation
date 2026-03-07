@@ -154,7 +154,7 @@
         "为后续上下文窗口留下明确下一步"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true
     }
   ]
 }
