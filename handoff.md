@@ -5,6 +5,8 @@
 - stage-01 到 stage-12 已全部完成，当前代码库已经具备统一配置加载、拓扑构建、统一工作负载、运行时执行器、CRUX、TE-CCL、结果导出、公平矩阵和交接归因资产。
 - 最小端到端基线结果已经验证通过：CRUX 结果目录为 [results/minimal_crux_e2e](results/minimal_crux_e2e)，TE-CCL 结果目录为 [results/minimal_teccl_e2e](results/minimal_teccl_e2e)。
 - 公平对比矩阵配置位于 [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml)，矩阵枚举与校验入口位于 [simulator/experiment/matrix.py](simulator/experiment/matrix.py)。
+- baseline_minimal 公共案例已经通过批处理入口执行，结果位于 [results/fair_comparison_matrix/scale_extension/baseline_minimal/crux](results/fair_comparison_matrix/scale_extension/baseline_minimal/crux) 和 [results/fair_comparison_matrix/scale_extension/baseline_minimal/teccl](results/fair_comparison_matrix/scale_extension/baseline_minimal/teccl)。
+- baseline_minimal 的 CRUX/TE-CCL 对比图已经生成，位于 [results/visualizations/baseline_minimal](results/visualizations/baseline_minimal)。
 - stage-12 生成的交接归因报告位于 [results/project_handoff/project_handoff_report.json](results/project_handoff/project_handoff_report.json) 和 [results/project_handoff/project_handoff_report.md](results/project_handoff/project_handoff_report.md)。
 
 ## 关键设计决策
@@ -27,11 +29,13 @@
 
 - 最小基线实验： [configs/experiment/minimal_crux_e2e.yaml](configs/experiment/minimal_crux_e2e.yaml) 与 [configs/experiment/minimal_teccl_e2e.yaml](configs/experiment/minimal_teccl_e2e.yaml)
 - 公平矩阵配置： [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml)
+- 公平矩阵批处理入口： [scripts/run_fair_matrix.py](scripts/run_fair_matrix.py) 与 [simulator/experiment/batch.py](simulator/experiment/batch.py)
 - 结果归因工具： [simulator/metrics/reporting.py](simulator/metrics/reporting.py)
+- CRUX/TE-CCL 对比可视化： [scripts/visualize_crux_vs_teccl.py](scripts/visualize_crux_vs_teccl.py) 与 [simulator/metrics/visualization.py](simulator/metrics/visualization.py)
 - 批量矩阵枚举入口： [simulator/experiment/matrix.py](simulator/experiment/matrix.py)
 
 ## 明确下一步
 
-1. 基于公平矩阵补一个批处理执行入口，把矩阵条目直接物化为可运行实验并写入 results/fair_comparison_matrix。
-2. 跑通至少一组 scale_extension 和一组 load_sensitivity 公共案例，再用 reporting 模块生成新的归因报告。
-3. 在绘图或 notebook 层消费 link_load_trace.csv 与 project_handoff_report.json，产出论文所需链路曲线和阶段耗时图。
+1. 继续执行至少一组 scale_extension 和一组 load_sensitivity 公共案例，把 fair_comparison_matrix 下的结果覆盖到非最小基线场景。
+2. 对新增矩阵结果重复调用 reporting 模块，扩展项目交接报告和归因摘要。
+3. 继续在绘图或 notebook 层消费 [results/visualizations/baseline_minimal](results/visualizations/baseline_minimal) 与后续对比图，产出论文图表。

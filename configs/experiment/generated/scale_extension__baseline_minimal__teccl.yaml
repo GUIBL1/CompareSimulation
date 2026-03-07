@@ -1,0 +1,32 @@
+meta:
+  name: scale_extension__baseline_minimal__teccl
+  version: 1
+  description: Matrix public case baseline_minimal for teccl
+inputs:
+  topology_file: /home/code/simulation/configs/topology/minimal_e2e_topology.yaml
+  workload_file: /home/code/simulation/configs/workload/minimal_e2e_workload.yaml
+scheduler:
+  type: teccl
+  crux:
+    max_priority_levels: 4
+    candidate_path_limit: 4
+    intensity_window_iterations: 3
+  teccl:
+    epoch_size_ms: 1.0
+    solver_backend: small_scale_debug_solver
+    max_solver_time_ms: 1000
+    allow_gpu_replication: true
+    allow_switch_replication: false
+    enable_gpu_buffer: true
+    enable_switch_buffer: false
+simulation:
+  time_unit: ms
+  max_time_ms: 2000
+  bandwidth_sharing_model: max_min_fair
+  random_seed: 7
+  repetitions: 3
+metrics:
+  export_csv: true
+  export_json: true
+  export_trace: true
+  output_dir: results/fair_comparison_matrix/scale_extension/baseline_minimal/teccl

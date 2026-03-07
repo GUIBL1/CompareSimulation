@@ -67,9 +67,9 @@ def build_project_handoff_report(
             "公平对比由共享 topology_file、workload_file、random_seed 和公共 simulation/metrics 设置定义，只有调度器私有参数允许变化。",
         ],
         "next_recommended_steps": [
-            "将公平矩阵条目物化为可运行实验配置，或直接补一个基于矩阵规格的批处理 runner。",
-            "执行部分矩阵案例，把当前归因报告从 minimal_e2e 基线扩展到规模扩展和负载敏感性实验。",
-            "基于现有链路时间线生成绘图脚本或 notebook，产出论文所需的链路曲线和阶段耗时图。",
+            "使用公平矩阵批处理 runner 执行 scale_extension 与 load_sensitivity 案例。",
+            "对已运行的 CRUX 与 TE-CCL 结果调用可视化模块，输出完成时间、热点链路和调度活动对比图。",
+            "在更多矩阵结果生成后，继续扩展项目交接报告与论文图表输入。",
         ],
     }
     if matrix_path is not None:

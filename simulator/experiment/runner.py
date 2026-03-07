@@ -105,7 +105,14 @@ class ExperimentRunner:
         output_path = Path(raw_output_dir)
         if output_path.is_absolute():
             return output_path
-        return (self.experiment_file.parent.parent.parent / output_path).resolve()
+        return (self._workspace_root() / output_path).resolve()
+
+    def _workspace_root(self) -> Path:
+        experiment_path = self.experiment_file.resolve()
+        for parent in [experiment_path.parent, *experiment_path.parents]:
+            if (parent / "plan.md").exists() and (parent / "feature_list.json").exists() and (parent / "configs").exists():
+                return parent
+        return experiment_path.parent.parent.parent
 
     def _build_aggregate_metrics(self, run_result: ExperimentRunResult) -> dict[str, Any]:
         completion_times = [record.runtime.now_ms for record in run_result.repetitions]

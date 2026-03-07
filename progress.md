@@ -289,6 +289,24 @@
 - 如需真正执行公平矩阵，优先补一个矩阵批处理 runner，将 [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml) 直接驱动为批量实验。
 - 在跑出更多矩阵结果后，重复调用 reporting 模块，产出覆盖 scale_extension 与 load_sensitivity 的归因报告和图表输入。
 
+## 2026-03-07 完整流程补齐
+- 实现: 补齐公平矩阵批处理执行入口与 CRUX/TE-CCL 对比可视化，使完整流程可直接运行。
+- 文件: simulator/experiment/batch.py, simulator/experiment/__init__.py, simulator/metrics/visualization.py, simulator/metrics/__init__.py, simulator/metrics/reporting.py, scripts/run_fair_matrix.py, scripts/visualize_crux_vs_teccl.py, README.md, handoff.md, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 新增 [simulator/experiment/batch.py](simulator/experiment/batch.py) 和 [scripts/run_fair_matrix.py](scripts/run_fair_matrix.py)，让公平矩阵条目可被物化为 runnable experiment YAML，并直接批量执行写入 results/fair_comparison_matrix。
+- 新增 [simulator/metrics/visualization.py](simulator/metrics/visualization.py) 和 [scripts/visualize_crux_vs_teccl.py](scripts/visualize_crux_vs_teccl.py)，输出完成时间对比、热点链路利用率曲线和调度活动对比图。
+- 更新 [README.md](README.md)，把“公平矩阵查看”升级成真正的批处理运行说明，并补充可视化命令。
+- 同步更新 [handoff.md](handoff.md) 与 reporting 模块的下一步建议，使交接文档与当前可执行入口一致。
+
+### 验证结果
+- 已在 networkSimulation 环境中安装 matplotlib，并成功导入用于生成 PNG 图像。
+- 公平矩阵可通过批处理 runner 直接执行；批处理会生成可运行 experiment YAML，并写出 batch manifest。
+- 可视化模块可直接对任意一组 CRUX/TE-CCL 结果目录生成 comparison_summary.json、comparison_summary.png、comparison_link_utilization.png 和 comparison_scheduler_activity.png。
+- 已实际执行 baseline_minimal 公共案例，生成 [results/fair_comparison_matrix/batch_manifest.json](results/fair_comparison_matrix/batch_manifest.json) 和 [results/visualizations/baseline_minimal](results/visualizations/baseline_minimal) 下的对比图产物。
+- 现有 handoff 报告与 README 已同步反映 batch runner 和 visualization 入口，完整流程从矩阵配置到结果图已经打通。
+
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。
 - 任何新的上下文窗口开始工作前，必须先读取 prompt.md、progress.md、feature_list.json 和 plan.md。
