@@ -247,6 +247,27 @@
 - 进入 stage-11-fair-comparison-matrix，固定公共拓扑、链路参数、数据规模、chunk 粒度和随机种子，开始构造公平对比矩阵。
 - 将 minimal_e2e 这组实验作为后续回归基线，避免后续扩展破坏 CRUX 和 TE-CCL 的统一输出契约。
 
+## 2026-03-07 公平对比矩阵阶段
+- 实现: 完成 stage-11-fair-comparison-matrix。
+- 文件: configs/experiment/fair_comparison_matrix.yaml, configs/topology/fair_scale_medium_topology.yaml, configs/topology/fair_scale_large_topology.yaml, configs/workload/fair_scale_medium_workload.yaml, configs/workload/fair_scale_large_workload.yaml, configs/workload/fair_load_low_workload.yaml, configs/workload/fair_load_medium_workload.yaml, configs/workload/fair_load_high_workload.yaml, simulator/experiment/matrix.py, simulator/experiment/__init__.py, feature_list.json, progress.md
+- 状态: ✅ 已完成
+
+### 本次改动
+- 新增机器可读的公平矩阵配置 [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml)，显式固定每个公共案例的 topology 文件、workload 文件、随机种子、公共仿真参数和结果输出根目录。
+- 在矩阵中定义了 CRUX 与 TE-CCL 的私有参数范围，并将规模扩展、负载敏感性和参数敏感性三类实验清单统一收敛到同一份配置中。
+- 新增 [simulator/experiment/matrix.py](simulator/experiment/matrix.py)，提供矩阵加载、引用校验、公共对比运行枚举和参数扫频运行枚举接口，使实验清单不再停留在手工文档层。
+- 新增中等规模和较大规模拓扑、以及低中高负载 workload 资产，作为公平对比矩阵的共享公共输入基线。
+
+### 验证结果
+- 在 networkSimulation 环境中成功加载 [configs/experiment/fair_comparison_matrix.yaml](configs/experiment/fair_comparison_matrix.yaml)，验证通过 6 个公共案例、12 条公共对比运行规格、4 个参数扫频定义和 11 条参数扫频运行规格。
+- 矩阵首条公共运行规格已正确解析出共享 topology/workload、random_seed、公共 simulation/metrics 参数，以及 CRUX 私有参数覆盖。
+- 首条参数扫频规格已正确继承 load_medium 公共输入，并只变更 CRUX 的 max_priority_levels，满足“只改算法私有参数”的公平性约束。
+- repeatability 字段已固化 conda 环境、runner 入口和共享控制字段，可直接作为后续大规模批量运行的复现实验条件。
+
+### 下一步建议
+- 进入 stage-12-reporting-and-handoff，整理当前最小实验和公平矩阵的结果归因视图，并把关键设计决策固化到交接文档中。
+- 如果下一步要开始批量跑矩阵，可基于 [simulator/experiment/matrix.py](simulator/experiment/matrix.py) 再补一个将矩阵条目物化为 experiment YAML 或直接驱动 runner 的批处理入口。
+
 ### 交接约束
 - 所有与 Python 相关的操作必须在 conda 的 networkSimulation 虚拟环境下进行。
 - 任何新的上下文窗口开始工作前，必须先读取 prompt.md、progress.md、feature_list.json 和 plan.md。

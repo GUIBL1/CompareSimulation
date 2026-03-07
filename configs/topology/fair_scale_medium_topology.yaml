@@ -1,0 +1,34 @@
+meta:
+  name: fair_scale_medium_topology
+  version: 1
+  description: medium generated topology for fair comparison matrix
+
+topology:
+  mode: generated
+  type: fat_tree
+  parameters:
+    k: 4
+    hosts_per_tor: 1
+    gpu_per_host: 2
+
+nodes:
+  host_count: 8
+  switch_count: 20
+  explicit_nodes: []
+
+links:
+  default_bandwidth_gbps: 100
+  default_latency_us: 2
+  bidirectional: true
+  explicit_links: []
+  overrides: []
+
+routing:
+  ecmp: true
+  max_paths_per_pair: 4
+  path_selection_mode: k_shortest
+
+constraints:
+  oversubscription_ratio: 1.0
+  switch_buffer_mb: 32
+  host_nic_bandwidth_gbps: 100

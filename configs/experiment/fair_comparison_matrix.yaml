@@ -1,0 +1,214 @@
+meta:
+  name: fair_comparison_matrix
+  version: 1
+  description: machine-readable fair comparison matrix for CRUX and TE-CCL
+
+defaults:
+  results_root: results/fair_comparison_matrix
+  repetitions: 3
+  simulation:
+    time_unit: ms
+    max_time_ms: 2000
+    bandwidth_sharing_model: max_min_fair
+  metrics:
+    export_csv: true
+    export_json: true
+    export_trace: true
+  repeatability:
+    conda_env: networkSimulation
+    runner_entrypoint: simulator.experiment.runner.ExperimentRunner.export_results
+    shared_control_fields:
+      - topology_file
+      - workload_file
+      - random_seed
+      - simulation.max_time_ms
+      - simulation.bandwidth_sharing_model
+      - metrics.export_json
+      - metrics.export_csv
+      - metrics.export_trace
+    notes:
+      - Each comparison pair must reuse the exact same topology file, workload file, seed, and public simulation settings.
+      - Only scheduler-specific fields under scheduler_overrides or parameter_sweeps may differ between CRUX and TE-CCL.
+      - Workload file is the source of truth for data size and chunk granularity; matrix metadata repeats it only for auditability.
+
+private_parameter_ranges:
+  crux:
+    max_priority_levels: [2, 4, 8]
+    candidate_path_limit: [2, 4, 8]
+    intensity_window_iterations: [1, 3]
+  teccl:
+    epoch_size_ms: [0.5, 1.0, 2.0]
+    solver_backend: [small_scale_debug_solver, heuristic_solver]
+    max_solver_time_ms: [1000]
+    allow_gpu_replication: [true]
+    allow_switch_replication: [false]
+    enable_gpu_buffer: [true]
+    enable_switch_buffer: [false]
+
+public_cases:
+  - case_id: baseline_minimal
+    family: scale_extension
+    topology_file: configs/topology/minimal_e2e_topology.yaml
+    workload_file: configs/workload/minimal_e2e_workload.yaml
+    random_seed: 7
+    public_baseline:
+      data_scale_mb: 96
+      chunk_count: 2
+      participant_count: 3
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 4
+        candidate_path_limit: 2
+        intensity_window_iterations: 1
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: small_scale_debug_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+    notes:
+      - Regression baseline introduced in stage-10.
+  - case_id: scale_medium
+    family: scale_extension
+    topology_file: configs/topology/fair_scale_medium_topology.yaml
+    workload_file: configs/workload/fair_scale_medium_workload.yaml
+    random_seed: 11
+    public_baseline:
+      data_scale_mb: 512
+      chunk_count: 8
+      participant_count: 4
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 4
+        candidate_path_limit: 4
+        intensity_window_iterations: 3
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: small_scale_debug_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+    notes:
+      - First scale-up point on a generated fat-tree.
+  - case_id: scale_large
+    family: scale_extension
+    topology_file: configs/topology/fair_scale_large_topology.yaml
+    workload_file: configs/workload/fair_scale_large_workload.yaml
+    random_seed: 19
+    public_baseline:
+      data_scale_mb: 1024
+      chunk_count: 16
+      participant_count: 8
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 8
+        candidate_path_limit: 8
+        intensity_window_iterations: 3
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: heuristic_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+    notes:
+      - Uses heuristic TE-CCL backend because candidate space is larger.
+  - case_id: load_low
+    family: load_sensitivity
+    topology_file: configs/topology/fair_scale_medium_topology.yaml
+    workload_file: configs/workload/fair_load_low_workload.yaml
+    random_seed: 23
+    public_baseline:
+      data_scale_mb: 256
+      chunk_count: 4
+      participant_count: 4
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 4
+        candidate_path_limit: 4
+        intensity_window_iterations: 3
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: small_scale_debug_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+  - case_id: load_medium
+    family: load_sensitivity
+    topology_file: configs/topology/fair_scale_medium_topology.yaml
+    workload_file: configs/workload/fair_load_medium_workload.yaml
+    random_seed: 29
+    public_baseline:
+      data_scale_mb: 640
+      chunk_count: 10
+      participant_count: 8
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 4
+        candidate_path_limit: 4
+        intensity_window_iterations: 3
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: heuristic_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+  - case_id: load_high
+    family: load_sensitivity
+    topology_file: configs/topology/fair_scale_medium_topology.yaml
+    workload_file: configs/workload/fair_load_high_workload.yaml
+    random_seed: 31
+    public_baseline:
+      data_scale_mb: 1152
+      chunk_count: 18
+      participant_count: 12
+    scheduler_overrides:
+      crux:
+        max_priority_levels: 8
+        candidate_path_limit: 8
+        intensity_window_iterations: 3
+      teccl:
+        epoch_size_ms: 1.0
+        solver_backend: heuristic_solver
+        max_solver_time_ms: 1000
+        allow_gpu_replication: true
+        allow_switch_replication: false
+        enable_gpu_buffer: true
+        enable_switch_buffer: false
+
+parameter_sweeps:
+  - sweep_id: crux_priority_levels
+    family: parameter_sensitivity
+    base_case_id: load_medium
+    scheduler_type: crux
+    parameter_name: max_priority_levels
+    values: [2, 4, 8]
+    notes:
+      - Keeps public inputs fixed while sweeping CRUX priority compression granularity.
+  - sweep_id: crux_candidate_paths
+    family: parameter_sensitivity
+    base_case_id: load_medium
+    scheduler_type: crux
+    parameter_name: candidate_path_limit
+    values: [2, 4, 8]
+  - sweep_id: teccl_epoch_size
+    family: parameter_sensitivity
+    base_case_id: load_medium
+    scheduler_type: teccl
+    parameter_name: epoch_size_ms
+    values: [0.5, 1.0, 2.0]
+  - sweep_id: teccl_solver_backend
+    family: parameter_sensitivity
+    base_case_id: load_medium
+    scheduler_type: teccl
+    parameter_name: solver_backend
+    values: [small_scale_debug_solver, heuristic_solver]

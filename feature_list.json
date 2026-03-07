@@ -141,7 +141,7 @@
         "记录每组实验的可重复运行条件"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true
     },
     {
       "id": "stage-12-reporting-and-handoff",

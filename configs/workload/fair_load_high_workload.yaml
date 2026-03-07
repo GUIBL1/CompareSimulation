@@ -1,0 +1,48 @@
+meta:
+  name: fair_load_high_workload
+  version: 1
+  description: high load workload for fair comparison matrix
+
+jobs:
+  - job_id: job_load_high_0
+    arrival_time_ms: 0
+    participants:
+      - gpu_0_0
+      - gpu_1_0
+      - gpu_2_0
+      - gpu_3_0
+    communication_pattern: all_reduce
+    total_data_mb: 512
+    chunk_count: 8
+    compute_phase_ms: 16
+    iteration_count: 1
+    repeat_interval_ms: 0
+    dependency_mode: strict
+  - job_id: job_load_high_1
+    arrival_time_ms: 2
+    participants:
+      - gpu_4_0
+      - gpu_5_0
+      - gpu_6_0
+      - gpu_7_0
+    communication_pattern: broadcast
+    total_data_mb: 384
+    chunk_count: 6
+    compute_phase_ms: 12
+    iteration_count: 1
+    repeat_interval_ms: 0
+    dependency_mode: strict
+  - job_id: job_load_high_2
+    arrival_time_ms: 4
+    participants:
+      - gpu_0_1
+      - gpu_1_1
+      - gpu_2_1
+      - gpu_3_1
+    communication_pattern: reduce
+    total_data_mb: 256
+    chunk_count: 4
+    compute_phase_ms: 9
+    iteration_count: 1
+    repeat_interval_ms: 0
+    dependency_mode: strict
