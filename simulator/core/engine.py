@@ -133,7 +133,7 @@ class RuntimeEngine:
         replica_id = str(action.metadata.get("replica_id", ""))
         ultimate_destination = str(action.metadata.get("ultimate_destination", action.next_node))
         flow_id = (
-            f"epoch::{action.chunk_id}::{replica_id}::{action.current_node}->{action.next_node}"
+            f"epoch::{action.epoch_index}::{action.chunk_id}::{replica_id}::{action.current_node}->{action.next_node}"
             f"::{ultimate_destination}::{action.source_gpu}"
         )
         if flow_id in runtime.flow_states:

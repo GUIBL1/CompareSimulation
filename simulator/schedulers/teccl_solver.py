@@ -385,11 +385,17 @@ class SmallScaleDebugSolver:
         destination: str,
         runtime_state: "RuntimeState",
     ) -> bool:
-        flow_id = (
-            f"epoch::{replica_state.chunk_id}::{replica_state.replica_id}::{current_node}->{next_node}"
+        flow_prefix = (
+            f"epoch::"
+            f"{replica_state.chunk_id}::{replica_state.replica_id}::{current_node}->{next_node}"
             f"::{destination}::{replica_state.source_gpu}"
         )
-        return flow_id in runtime_state.flow_states
+        for flow_id, flow_state in runtime_state.flow_states.items():
+            if flow_state.status == "completed":
+                continue
+            if flow_id.endswith(flow_prefix):
+                return True
+        return False
 
 
 @dataclass(slots=True)

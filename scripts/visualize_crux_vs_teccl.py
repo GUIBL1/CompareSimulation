@@ -13,7 +13,7 @@ from simulator.metrics import generate_crux_teccl_comparison_visuals
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate comparison figures for one CRUX result dir and one TE-CCL result dir.")
+    parser = argparse.ArgumentParser(description="Generate per-metric comparison figures for one CRUX result dir and one TE-CCL result dir.")
     parser.add_argument("--crux-result", required=True, help="Result directory for the CRUX run.")
     parser.add_argument("--teccl-result", required=True, help="Result directory for the TE-CCL run.")
     parser.add_argument("--output-dir", required=True, help="Directory to write figures and summary JSON.")
