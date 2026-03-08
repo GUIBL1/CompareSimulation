@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import hashlib
 from dataclasses import dataclass, field
 from math import ceil
 from typing import Any
@@ -9,6 +10,7 @@ from simulator.core.models import RuntimeState
 from simulator.schedulers.base import EpochAction
 from simulator.schedulers.base import ScheduleDecision
 from simulator.schedulers.base import Scheduler
+from simulator.schedulers.teccl_solver import ExactMILPTECCLSolver
 from simulator.schedulers.teccl_solver import HeuristicTECCLSolver
 from simulator.schedulers.teccl_solver import SmallScaleDebugSolver
 from simulator.workload.models import UnifiedJob
@@ -147,6 +149,9 @@ class TECCLScheduler(Scheduler):
         if self.strategy.solver_backend == "small_scale_debug_solver":
             solver = SmallScaleDebugSolver(strategy=self.strategy)
             return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
+        if self.strategy.solver_backend == "exact_milp_solver":
+            solver = ExactMILPTECCLSolver(strategy=self.strategy)
+            return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
         if self.strategy.solver_backend == "heuristic_solver":
             solver = HeuristicTECCLSolver(strategy=self.strategy)
             return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
@@ -176,7 +181,12 @@ class TECCLScheduler(Scheduler):
                 if next_destination is None:
                     replica_state.switch_arrivals.pop(switch_id, None)
                     continue
-                path = self._shortest_path(runtime_state, switch_id, next_destination)
+                path = self._shortest_path(
+                    runtime_state,
+                    switch_id,
+                    next_destination,
+                    tie_break_key=f"{replica_state.replica_id}::{switch_id}::{next_destination}::switch",
+                )
                 if len(path) < 2:
                     replica_state.switch_arrivals.pop(switch_id, None)
                     continue
@@ -214,7 +224,12 @@ class TECCLScheduler(Scheduler):
                     continue
                 max_targets = len(pending_destinations) if self.strategy.allow_gpu_replication else 1
                 for destination in pending_destinations[:max_targets]:
-                    path = self._shortest_path(runtime_state, gpu_id, destination)
+                    path = self._shortest_path(
+                        runtime_state,
+                        gpu_id,
+                        destination,
+                        tie_break_key=f"{replica_state.replica_id}::{gpu_id}::{destination}::gpu",
+                    )
                     if len(path) < 2:
                         continue
                     next_hop = path[1]
@@ -336,7 +351,12 @@ class TECCLScheduler(Scheduler):
             inflight_epoch = replica_state.inflight_destinations.get(destination)
             if inflight_epoch is not None and inflight_epoch > current_epoch:
                 continue
-            path = self._shortest_path(runtime_state, current_node, destination)
+            path = self._shortest_path(
+                runtime_state,
+                current_node,
+                destination,
+                tie_break_key=f"{replica_state.replica_id}::{current_node}::{destination}::switch-dest",
+            )
             if len(path) < 2:
                 continue
             destinations.append((len(path), destination))
@@ -355,7 +375,12 @@ class TECCLScheduler(Scheduler):
             inflight_epoch = replica_state.inflight_destinations.get(destination)
             if inflight_epoch is not None and inflight_epoch >= current_epoch:
                 continue
-            path = self._shortest_path(runtime_state, current_node, destination)
+            path = self._shortest_path(
+                runtime_state,
+                current_node,
+                destination,
+                tie_break_key=f"{replica_state.replica_id}::{current_node}::{destination}::gpu-dest",
+            )
             if len(path) < 2:
                 continue
             candidates.append((len(path), destination))
@@ -403,23 +428,67 @@ class TECCLScheduler(Scheduler):
         node = runtime_state.topology.nodes.get(node_id)
         return node.node_type if node is not None else "unknown"
 
-    def _shortest_path(self, runtime_state: RuntimeState, src: str, dst: str) -> list[str]:
+    def _shortest_path(
+        self,
+        runtime_state: RuntimeState,
+        src: str,
+        dst: str,
+        tie_break_key: str | None = None,
+    ) -> list[str]:
         if src == dst:
             return [src]
         queue: deque[list[str]] = deque([[src]])
-        visited = {src}
+        candidates: list[list[str]] = []
+        shortest_length: int | None = None
         while queue:
             path = queue.popleft()
             current = path[-1]
+            if shortest_length is not None and len(path) > shortest_length:
+                continue
+            if current == dst:
+                shortest_length = len(path)
+                candidates.append(path)
+                continue
             for neighbor in runtime_state.topology.adjacency.get(current, []):
-                if neighbor in visited:
+                if neighbor in path:
                     continue
-                next_path = path + [neighbor]
-                if neighbor == dst:
-                    return next_path
-                visited.add(neighbor)
-                queue.append(next_path)
-        return []
+                queue.append(path + [neighbor])
+        if not candidates:
+            return []
+        return list(
+            min(
+                candidates,
+                key=lambda path: (
+                    self._path_cost(runtime_state, path),
+                    self._stable_path_rank(tie_break_key or f"{src}->{dst}", path),
+                ),
+            )
+        )
+
+    def _path_cost(self, runtime_state: RuntimeState, path: list[str]) -> tuple[float, int, int]:
+        link_penalties: list[tuple[float, int]] = []
+        for src, dst in zip(path, path[1:]):
+            link_state = self._lookup_link_state(runtime_state, src, dst)
+            if link_state is None:
+                return (float("inf"), 1 << 30, len(path))
+            link_penalties.append((link_state.utilization, len(link_state.active_flows)))
+        if not link_penalties:
+            return (float("inf"), 1 << 30, len(path))
+        return (
+            max(item[0] for item in link_penalties),
+            sum(item[1] for item in link_penalties),
+            len(path),
+        )
+
+    def _lookup_link_state(self, runtime_state: RuntimeState, src: str, dst: str):
+        for link in runtime_state.topology.links:
+            if (link.src == src and link.dst == dst) or (link.bidirectional and link.src == dst and link.dst == src):
+                return runtime_state.link_states.get(link.link_id)
+        return None
+
+    def _stable_path_rank(self, tie_break_key: str, path: list[str]) -> int:
+        digest = hashlib.sha1(f"{tie_break_key}|{'->'.join(path)}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
     def _build_debug_job_summary(self) -> dict[str, object]:
         summary: dict[str, object] = {}

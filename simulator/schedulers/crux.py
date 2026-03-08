@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from collections import defaultdict
 from dataclasses import dataclass, field
 from math import ceil
 
@@ -31,6 +33,7 @@ class CruxScheduler(Scheduler):
 
     def compute_schedule(self, runtime_state: RuntimeState) -> ScheduleDecision:
         self._refresh_observed_comm_time(runtime_state)
+        provisional_link_loads: dict[str, int] = defaultdict(int)
         ranked_jobs = sorted(
             runtime_state.active_jobs,
             key=lambda job: (-self._intensity_score(job), job.arrival_time_ms, job.job_id),
@@ -49,7 +52,7 @@ class CruxScheduler(Scheduler):
             priority = self._compress_priority(index, job_count)
             decision.priority_assignments[job.job_id] = priority
             decision.metadata["intensity_scores"][job.job_id] = intensity
-            for flow_id, path in self._select_paths_for_job(job, runtime_state).items():
+            for flow_id, path in self._select_paths_for_job(job, runtime_state, provisional_link_loads).items():
                 decision.path_assignments[flow_id] = path
 
         self.last_priority_assignments = dict(decision.priority_assignments)
@@ -100,7 +103,12 @@ class CruxScheduler(Scheduler):
         bucket_size = max(1, ceil(job_count / self.max_priority_levels))
         return min(rank_index // bucket_size, self.max_priority_levels - 1)
 
-    def _select_paths_for_job(self, job: UnifiedJob, runtime_state: RuntimeState) -> dict[str, list[str]]:
+    def _select_paths_for_job(
+        self,
+        job: UnifiedJob,
+        runtime_state: RuntimeState,
+        provisional_link_loads: dict[str, int],
+    ) -> dict[str, list[str]]:
         assignments: dict[str, list[str]] = {}
         for demand in job.communication_demands:
             for chunk in demand.chunks:
@@ -109,10 +117,17 @@ class CruxScheduler(Scheduler):
                         if source_node == destination_node:
                             continue
                         flow_id = f"flow::{job.job_id}::{chunk.chunk_id}::{source_node}->{destination_node}"
-                        path = self._select_best_path(runtime_state, flow_id, source_node, destination_node)
+                        path = self._select_best_path(
+                            runtime_state,
+                            flow_id,
+                            source_node,
+                            destination_node,
+                            provisional_link_loads,
+                        )
                         if path:
                             assignments[flow_id] = path
                             self.last_path_assignments[flow_id] = list(path)
+                            self._reserve_path(path, runtime_state, provisional_link_loads)
         return assignments
 
     def _select_best_path(
@@ -121,6 +136,7 @@ class CruxScheduler(Scheduler):
         flow_id: str,
         source_node: str,
         destination_node: str,
+        provisional_link_loads: dict[str, int],
     ) -> list[str]:
         candidates = runtime_state.topology.candidate_paths.get((source_node, destination_node), [])
         if not candidates:
@@ -131,32 +147,48 @@ class CruxScheduler(Scheduler):
         best_path = min(
             limited_candidates,
             key=lambda path: (
-                self._path_cost(runtime_state, path),
+                self._path_cost(runtime_state, path, provisional_link_loads),
                 0 if cached_path == path else 1,
                 len(path),
-                tuple(path),
+                self._stable_path_rank(flow_id, path),
             ),
         )
         return list(best_path)
 
-    def _path_cost(self, runtime_state: RuntimeState, path: list[str]) -> tuple[float, float, int]:
-        link_penalties: list[tuple[float, float]] = []
+    def _path_cost(
+        self,
+        runtime_state: RuntimeState,
+        path: list[str],
+        provisional_link_loads: dict[str, int],
+    ) -> tuple[float, int, int, int]:
+        link_penalties: list[tuple[float, int]] = []
         for src, dst in zip(path, path[1:]):
-            link_state = self._lookup_link_state(runtime_state, src, dst)
-            if link_state is None:
-                return (float("inf"), float("inf"), len(path))
-            contention = len(link_state.active_flows)
-            link_penalties.append((link_state.utilization, contention))
+            link_id, link_state = self._lookup_link_state(runtime_state, src, dst)
+            if link_state is None or link_id is None:
+                return (float("inf"), 1 << 30, 1 << 30, len(path))
+            projected_contention = len(link_state.active_flows) + provisional_link_loads.get(link_id, 0)
+            link_penalties.append((link_state.utilization, projected_contention))
         if not link_penalties:
-            return (float("inf"), float("inf"), len(path))
+            return (float("inf"), 1 << 30, 1 << 30, len(path))
         max_utilization = max(item[0] for item in link_penalties)
-        total_contention = sum(item[1] for item in link_penalties)
-        return (max_utilization, total_contention, len(path))
+        max_projected_contention = max(item[1] for item in link_penalties)
+        total_projected_contention = sum(item[1] for item in link_penalties)
+        return (max_utilization, max_projected_contention, total_projected_contention, len(path))
 
     def _lookup_link_state(self, runtime_state: RuntimeState, src: str, dst: str):
         for link in runtime_state.topology.links:
             if link.src == src and link.dst == dst:
-                return runtime_state.link_states.get(link.link_id)
+                return link.link_id, runtime_state.link_states.get(link.link_id)
             if link.bidirectional and link.src == dst and link.dst == src:
-                return runtime_state.link_states.get(link.link_id)
-        return None
+                return link.link_id, runtime_state.link_states.get(link.link_id)
+        return None, None
+
+    def _reserve_path(self, path: list[str], runtime_state: RuntimeState, provisional_link_loads: dict[str, int]) -> None:
+        for src, dst in zip(path, path[1:]):
+            link_id, _ = self._lookup_link_state(runtime_state, src, dst)
+            if link_id is not None:
+                provisional_link_loads[link_id] += 1
+
+    def _stable_path_rank(self, flow_id: str, path: list[str]) -> int:
+        digest = hashlib.sha1(f"{flow_id}|{'->'.join(path)}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)

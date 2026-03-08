@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+import hashlib
 from math import ceil
 from typing import TYPE_CHECKING
 from typing import Any
+
+import pulp
 
 from simulator.schedulers.base import EpochAction
 
@@ -103,10 +106,17 @@ class SmallScaleDebugSolver:
             feasible_candidates: list[SolverCandidateAction] = []
             if arrival_epoch <= current_epoch:
                 for destination in self._pending_destinations(replica_state, current_epoch, switch_id, runtime_state, for_switch=True):
-                    path = self._shortest_path(runtime_state, switch_id, destination)
+                    path = self._shortest_path(
+                        runtime_state,
+                        switch_id,
+                        destination,
+                        tie_break_key=f"{replica_state.replica_id}::{switch_id}::{destination}::switch",
+                    )
                     if len(path) < 2:
                         continue
                     next_hop = path[1]
+                    if self._epoch_flow_already_exists(replica_state, switch_id, next_hop, destination, runtime_state):
+                        continue
                     feasible_candidates.append(
                         SolverCandidateAction(
                             replica_id=replica_state.replica_id,
@@ -141,10 +151,17 @@ class SmallScaleDebugSolver:
             feasible_candidates = []
             if buffer_available:
                 for destination in self._pending_destinations(replica_state, current_epoch, gpu_id, runtime_state, for_switch=False):
-                    path = self._shortest_path(runtime_state, gpu_id, destination)
+                    path = self._shortest_path(
+                        runtime_state,
+                        gpu_id,
+                        destination,
+                        tie_break_key=f"{replica_state.replica_id}::{gpu_id}::{destination}::gpu",
+                    )
                     if len(path) < 2:
                         continue
                     next_hop = path[1]
+                    if self._epoch_flow_already_exists(replica_state, gpu_id, next_hop, destination, runtime_state):
+                        continue
                     feasible_candidates.append(
                         SolverCandidateAction(
                             replica_id=replica_state.replica_id,
@@ -267,7 +284,12 @@ class SmallScaleDebugSolver:
                     continue
                 if not for_switch and inflight_epoch >= current_epoch:
                     continue
-            path = self._shortest_path(runtime_state, current_node, destination)
+            path = self._shortest_path(
+                runtime_state,
+                current_node,
+                destination,
+                tie_break_key=f"{replica_state.replica_id}::{current_node}::{destination}::pending",
+            )
             if len(path) < 2:
                 continue
             candidates.append((len(path), destination))
@@ -286,23 +308,67 @@ class SmallScaleDebugSolver:
                 return False
         return True
 
-    def _shortest_path(self, runtime_state: "RuntimeState", src: str, dst: str) -> list[str]:
+    def _shortest_path(
+        self,
+        runtime_state: "RuntimeState",
+        src: str,
+        dst: str,
+        tie_break_key: str | None = None,
+    ) -> list[str]:
         if src == dst:
             return [src]
         queue: deque[list[str]] = deque([[src]])
-        visited = {src}
+        candidates: list[list[str]] = []
+        shortest_length: int | None = None
         while queue:
             path = queue.popleft()
             current = path[-1]
+            if shortest_length is not None and len(path) > shortest_length:
+                continue
+            if current == dst:
+                shortest_length = len(path)
+                candidates.append(path)
+                continue
             for neighbor in runtime_state.topology.adjacency.get(current, []):
-                if neighbor in visited:
+                if neighbor in path:
                     continue
-                next_path = path + [neighbor]
-                if neighbor == dst:
-                    return next_path
-                visited.add(neighbor)
-                queue.append(next_path)
-        return []
+                queue.append(path + [neighbor])
+        if not candidates:
+            return []
+        return list(
+            min(
+                candidates,
+                key=lambda path: (
+                    self._path_cost(runtime_state, path),
+                    self._stable_path_rank(tie_break_key or f"{src}->{dst}", path),
+                ),
+            )
+        )
+
+    def _path_cost(self, runtime_state: "RuntimeState", path: list[str]) -> tuple[float, int, int]:
+        link_penalties: list[tuple[float, int]] = []
+        for src, dst in zip(path, path[1:]):
+            link_state = self._lookup_link_state(runtime_state, src, dst)
+            if link_state is None:
+                return (float("inf"), 1 << 30, len(path))
+            link_penalties.append((link_state.utilization, len(link_state.active_flows)))
+        if not link_penalties:
+            return (float("inf"), 1 << 30, len(path))
+        return (
+            max(item[0] for item in link_penalties),
+            sum(item[1] for item in link_penalties),
+            len(path),
+        )
+
+    def _lookup_link_state(self, runtime_state: "RuntimeState", src: str, dst: str):
+        for link in runtime_state.topology.links:
+            if (link.src == src and link.dst == dst) or (link.bidirectional and link.src == dst and link.dst == src):
+                return runtime_state.link_states.get(link.link_id)
+        return None
+
+    def _stable_path_rank(self, tie_break_key: str, path: list[str]) -> int:
+        digest = hashlib.sha1(f"{tie_break_key}|{'->'.join(path)}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
     def _link_delay_epochs(self, runtime_state: "RuntimeState", src: str, dst: str) -> int:
         for link in runtime_state.topology.links:
@@ -310,6 +376,20 @@ class SmallScaleDebugSolver:
                 link_latency_ms = link.latency_us / 1000.0
                 return max(1, ceil(link_latency_ms / self.strategy.epoch_size_ms))
         return 1
+
+    def _epoch_flow_already_exists(
+        self,
+        replica_state: "TECCLChunkReplicaState",
+        current_node: str,
+        next_node: str,
+        destination: str,
+        runtime_state: "RuntimeState",
+    ) -> bool:
+        flow_id = (
+            f"epoch::{replica_state.chunk_id}::{replica_state.replica_id}::{current_node}->{next_node}"
+            f"::{destination}::{replica_state.source_gpu}"
+        )
+        return flow_id in runtime_state.flow_states
 
 
 @dataclass(slots=True)
@@ -390,3 +470,122 @@ class HeuristicTECCLSolver(SmallScaleDebugSolver):
         expected_arrival = candidate.expected_arrival_epoch
         path_len = len(candidate.route_fragment)
         return (direct_delivery, expected_arrival, node_bias, path_len, candidate.current_node, candidate.ultimate_destination)
+
+
+@dataclass(slots=True)
+class ExactMILPTECCLSolver(SmallScaleDebugSolver):
+    solver_name: str = field(default="exact_milp_solver", init=False)
+
+    def solve_epoch(
+        self,
+        job: "UnifiedJob",
+        job_state: "TECCLJobState",
+        runtime_state: "RuntimeState",
+        current_epoch: int,
+    ) -> SolverResult:
+        grouped_candidates: list[list[SolverCandidateAction]] = []
+        constraint_reports: list[SolverConstraintReport] = []
+
+        for replica_state in job_state.chunk_replicas.values():
+            if replica_state.replica_id in job_state.completed_replica_ids:
+                continue
+            if not self._dependencies_satisfied(replica_state, job_state):
+                continue
+            replica_candidates, replica_reports = self._enumerate_replica_candidates(
+                replica_state,
+                runtime_state,
+                current_epoch,
+            )
+            constraint_reports.extend(replica_reports)
+            if replica_candidates:
+                grouped_candidates.extend(replica_candidates)
+
+        chosen = self._solve_milp(grouped_candidates)
+        epoch_actions = [self._candidate_to_epoch_action(job_state, candidate) for candidate in chosen]
+        return SolverResult(
+            epoch_actions=epoch_actions,
+            selected_candidates=chosen,
+            constraint_reports=constraint_reports,
+            metadata={
+                "solver_name": self.solver_name,
+                "candidate_group_count": len(grouped_candidates),
+                "selected_action_count": len(chosen),
+                "solver_status": self._last_solver_status,
+                "objective_value": self._last_objective_value,
+            },
+        )
+
+    _last_solver_status: str = field(default="not_run", init=False)
+    _last_objective_value: float = field(default=0.0, init=False)
+
+    def _solve_milp(self, grouped_candidates: list[list[SolverCandidateAction]]) -> list[SolverCandidateAction]:
+        if not grouped_candidates:
+            self._last_solver_status = "empty"
+            self._last_objective_value = 0.0
+            return []
+
+        flat_candidates: list[tuple[int, SolverCandidateAction]] = []
+        for group_index, group in enumerate(grouped_candidates):
+            for candidate in group:
+                flat_candidates.append((group_index, candidate))
+
+        problem = pulp.LpProblem("teccl_epoch_selection", pulp.LpMaximize)
+        variables: dict[int, pulp.LpVariable] = {
+            index: pulp.LpVariable(f"x_{index}", lowBound=0, upBound=1, cat="Binary")
+            for index in range(len(flat_candidates))
+        }
+
+        objective_terms = []
+        for index, (_, candidate) in enumerate(flat_candidates):
+            objective_terms.append(self._candidate_objective_weight(candidate) * variables[index])
+        problem += pulp.lpSum(objective_terms)
+
+        for group_index in range(len(grouped_candidates)):
+            problem += pulp.lpSum(
+                variables[index]
+                for index, (candidate_group_index, _) in enumerate(flat_candidates)
+                if candidate_group_index == group_index
+            ) <= 1
+
+        by_target: dict[tuple[str, str], list[int]] = {}
+        by_switch: dict[str, list[int]] = {}
+        by_link: dict[tuple[str, str], list[int]] = {}
+        for index, (_, candidate) in enumerate(flat_candidates):
+            by_target.setdefault((candidate.replica_id, candidate.ultimate_destination), []).append(index)
+            by_link.setdefault((candidate.current_node, candidate.next_node), []).append(index)
+            if candidate.node_kind == "switch" and not self.strategy.allow_switch_replication:
+                by_switch.setdefault(candidate.current_node, []).append(index)
+
+        for indices in by_target.values():
+            if len(indices) > 1:
+                problem += pulp.lpSum(variables[index] for index in indices) <= 1
+
+        for indices in by_switch.values():
+            if len(indices) > 1:
+                problem += pulp.lpSum(variables[index] for index in indices) <= 1
+
+        for indices in by_link.values():
+            if len(indices) > 1:
+                problem += pulp.lpSum(variables[index] for index in indices) <= 1
+
+        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=max(1, int(self.strategy.max_solver_time_ms / 1000)))
+        problem.solve(solver)
+        self._last_solver_status = pulp.LpStatus.get(problem.status, str(problem.status))
+        self._last_objective_value = float(pulp.value(problem.objective) or 0.0)
+
+        if self._last_solver_status not in {"Optimal", "Not Solved", "Undefined", "Integer Feasible"}:
+            return []
+
+        chosen = [
+            candidate
+            for index, (_, candidate) in enumerate(flat_candidates)
+            if pulp.value(variables[index]) and pulp.value(variables[index]) > 0.5
+        ]
+        return sorted(chosen, key=lambda item: (item.current_node, item.next_node, item.ultimate_destination))
+
+    def _candidate_objective_weight(self, candidate: SolverCandidateAction) -> float:
+        is_gpu = 1.0 if candidate.node_kind == "gpu" else 0.0
+        direct_delivery = 1.0 if len(candidate.route_fragment) == 2 else 0.0
+        faster_arrival = 1.0 / max(1, candidate.expected_arrival_epoch)
+        shorter_fragment = 1.0 / max(1, len(candidate.route_fragment))
+        return 1000.0 + 20.0 * direct_delivery + 10.0 * is_gpu + 5.0 * faster_arrival + shorter_fragment
