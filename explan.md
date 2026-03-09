@@ -234,6 +234,59 @@ $$
 4. `link_load_trace.csv`
    用于看链路利用率曲线。
 
+### 5.1 标准化 compare 入口
+
+当前仓库主目录提供了 run_experiment_compare.sh，作为统一的对比入口。
+
+它内部调用 scripts/compare_experiments.py，按如下顺序工作：
+
+1. 读取两份 experiment YAML。
+2. 分别运行 experiment-a 和 experiment-b。
+3. 将两边原始结果写入同一输出根目录下的 run_a 和 run_b。
+4. 基于两边结果生成 comparison_summary.json 和一指标一图输出。
+5. 写出 comparison_manifest.json，记录输入 experiment、显示标签与输出目录。
+
+它的命令格式是：
+
+```bash
+./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <output-dir> [extra compare_experiments.py args...]
+```
+
+其中最常用的额外参数是：
+
+1. --title
+2. --label-a
+3. --label-b
+
+因此，当前推荐的对比流程是优先使用这个脚本，而不是先手工分别运行两个实验，再单独调用绘图逻辑。
+
+### 5.2 当前 compare 输出结构
+
+标准化 compare 结果目录通常包含：
+
+1. comparison_manifest.json
+2. run_a/
+3. run_b/
+4. comparison/
+
+其中 comparison/ 下最关键的是：
+
+1. comparison_summary.json
+2. metric_plots/
+
+metric_plots 使用一指标一图的组织方式，当前主图通常包括：
+
+1. completion_time_ms
+2. job_completion_ratio
+3. bottleneck_link_peak_utilization
+4. bottleneck_link_average_utilization
+5. bottleneck_busy_time_ms
+6. queue_backlog_percentiles_mb
+7. flow_completion_time_percentiles_ms
+8. job_completion_time_percentiles_ms
+9. completion_time_spread_ms
+10. congestion_duration_ms
+
 ## 6. 各指标的意义
 
 下面把指标分成三类：

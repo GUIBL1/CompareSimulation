@@ -173,7 +173,85 @@ PY
 
 - configs/experiment/fair_comparison_matrix.yaml
 
-### 4. 生成 CRUX 与 TE-CCL 对比可视化
+### 4. 使用标准化对比脚本 run_experiment_compare.sh
+
+主目录下的 run_experiment_compare.sh 是当前推荐的对比入口。
+
+它会自动完成以下步骤：
+
+- 读取两份 experiment 配置
+- 分别运行 experiment-a 和 experiment-b
+- 将两边原始结果写到同一个输出根目录下的 run_a 和 run_b
+- 自动生成 comparison_summary.json 和一指标一图的 comparison/metric_plots
+- 写出 comparison_manifest.json，记录输入配置、显示标签和输出位置
+
+基本命令格式：
+
+```bash
+conda activate networkSimulation
+./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <output-dir>
+```
+
+例如，对比 triple 拓扑下的 CRUX 与 TE-CCL：
+
+```bash
+conda activate networkSimulation
+./run_experiment_compare.sh \
+    configs/experiment/inter_dc_triple_parallel_crux.yaml \
+    configs/experiment/inter_dc_triple_parallel_teccl.yaml \
+    results/inter_dc_triple_parallel_crux_vs_teccl \
+    --title "Triple Parallel CRUX vs TE-CCL"
+```
+
+第 4 个及之后的参数会透传给 scripts/compare_experiments.py。当前最常用的是：
+
+- --title
+- --label-a
+- --label-b
+
+例如：
+
+```bash
+conda activate networkSimulation
+./run_experiment_compare.sh \
+    configs/experiment/inter_dc_dual_parallel_crux.yaml \
+    configs/experiment/inter_dc_dual_parallel_teccl.yaml \
+    results/inter_dc_dual_parallel_crux_vs_teccl \
+    --title "Dual Parallel CRUX vs TE-CCL" \
+    --label-a "CRUX" \
+    --label-b "TE-CCL"
+```
+
+输出目录结构通常如下：
+
+```text
+results/<your-compare-dir>/
+├── comparison_manifest.json
+├── run_a/
+├── run_b/
+└── comparison/
+    ├── comparison_summary.json
+    └── metric_plots/
+        ├── completion_time_ms.png
+        ├── job_completion_ratio.png
+        ├── bottleneck_link_peak_utilization.png
+        ├── bottleneck_link_average_utilization.png
+        ├── bottleneck_busy_time_ms.png
+        ├── queue_backlog_percentiles_mb.png
+        ├── flow_completion_time_percentiles_ms.png
+        ├── job_completion_time_percentiles_ms.png
+        ├── completion_time_spread_ms.png
+        └── congestion_duration_ms.png
+```
+
+其中最值得优先查看的是：
+
+- comparison/comparison_summary.json
+- comparison/metric_plots/*.png
+- run_a/summary.json
+- run_b/summary.json
+
+### 5. 仅基于已有结果目录生成对比可视化
 
 下面的命令会读取两个结果目录，并输出对比图和摘要 JSON：
 
@@ -185,14 +263,21 @@ conda activate networkSimulation && /home/code/miniconda3/envs/networkSimulation
     --title "Minimal CRUX vs TE-CCL"
 ```
 
-默认会生成：
+当前会生成：
 
 - comparison_summary.json
-- comparison_summary.png
-- comparison_link_utilization.png
-- comparison_scheduler_activity.png
+- metric_plots/completion_time_ms.png
+- metric_plots/job_completion_ratio.png
+- metric_plots/bottleneck_link_peak_utilization.png
+- metric_plots/bottleneck_link_average_utilization.png
+- metric_plots/bottleneck_busy_time_ms.png
+- metric_plots/queue_backlog_percentiles_mb.png
+- metric_plots/flow_completion_time_percentiles_ms.png
+- metric_plots/job_completion_time_percentiles_ms.png
+- metric_plots/completion_time_spread_ms.png
+- metric_plots/congestion_duration_ms.png
 
-### 5. 生成项目交接与归因报告
+### 6. 生成项目交接与归因报告
 
 ```bash
 conda activate networkSimulation && /home/code/miniconda3/envs/networkSimulation/bin/python - <<'PY'
@@ -226,6 +311,7 @@ PY
 - flow_trace.csv：flow 级执行轨迹
 - schedule_history.json：每轮调度历史
 - scheduler_debug.json：调度器内部调试状态
+- comparison_manifest.json：标准化 compare 入口的运行清单
 
 ## 公平对比规则
 
