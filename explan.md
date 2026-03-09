@@ -490,47 +490,7 @@ $$
 3. schedule_history.json
 4. link_load_trace.csv
 
-### 8.4 建议的汇报模板
-
-如果要给出一段标准结论，推荐按下面格式写：
-
-1. 说明公共输入是否一致。
-2. 给出 job_completion_ratio。
-3. 给出 completion_time_ms 和时延分位数对比。
-4. 给出瓶颈链路利用率、队列积压和拥塞时长对比。
-5. 若有必要，再给出行为解释。
-
-例如：
-
-> 在相同 topology、workload、random_seed 和 max-min fair 带宽共享模型下，CRUX 与 TE-CCL 的输入保持一致。CRUX 的 completion_time_ms 更低，且 job completion time 的 P95 更短；与此同时，TE-CCL 的瓶颈链路平均利用率更高、拥塞持续时间更长。若关注端到端交付效率，应优先采用 completion_time_ms、job_completion_ratio 与时延分位数作为主结论，再用瓶颈链路指标解释原因。
-
-## 9. 当前仓库中两类 inter-DC 实验应该怎么读
-
-### 9.1 inter_dc_mild
-
-这一组用于“双方都完成时的纯性能对比”。
-
-推荐重点看：
-
-1. `job_completion_ratio`
-2. `completion_time_ms`
-3. `job_completion_time_percentiles_ms`
-4. `flow_completion_time_percentiles_ms`
-5. `completion_time_spread_ms`
-
-### 9.2 inter_dc_broadcast
-
-这一组更像压力场景。它用于看较重负载下两种调度逻辑在跨 DC 链路上的行为差异。
-
-这里除了主指标，还建议重点看：
-
-1. `bottleneck_link_peak_utilization`
-2. `bottleneck_link_average_utilization`
-3. `queue_backlog_percentiles_mb`
-4. `congestion_duration_ms`
-5. `flow_completion_time_percentiles_ms`
-
-## 10. 一句话总结
+## 9. 一句话总结
 
 当前系统的实现方法可以概括为：
 
