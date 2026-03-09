@@ -177,6 +177,8 @@ PY
 
 主目录下的 run_experiment_compare.sh 是当前推荐的对比入口。
 
+这个脚本内部固定使用 networkSimulation 环境中的 Python 解释器，因此即使不手工写出完整 Python 路径，也会在同一解释器口径下运行 compare 流程。为了避免环境变量或依赖歧义，仍然建议先执行 conda activate networkSimulation。
+
 它会自动完成以下步骤：
 
 - 读取两份 experiment 配置
@@ -208,6 +210,8 @@ conda activate networkSimulation
 - --title
 - --label-a
 - --label-b
+
+如果不显式传 --label-a 和 --label-b，则会默认使用两份 experiment YAML 里的 meta.name 作为图例标签。
 
 例如：
 
@@ -250,6 +254,8 @@ results/<your-compare-dir>/
 - comparison/metric_plots/*.png
 - run_a/summary.json
 - run_b/summary.json
+
+comparison_summary.json 中会同时写出每个指标的 display_name、chart_type，以及左右两侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
 
 ### 5. 仅基于已有结果目录生成对比可视化
 
@@ -311,7 +317,12 @@ PY
 - flow_trace.csv：flow 级执行轨迹
 - schedule_history.json：每轮调度历史
 - scheduler_debug.json：调度器内部调试状态
+
+如果是通过 run_experiment_compare.sh 运行标准化对比，则在对比输出根目录下还会额外出现：
+
 - comparison_manifest.json：标准化 compare 入口的运行清单
+- comparison/comparison_summary.json：对比指标汇总
+- comparison/metric_plots/*.png：一指标一图的对比结果
 
 ## 公平对比规则
 
