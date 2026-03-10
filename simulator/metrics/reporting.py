@@ -194,6 +194,26 @@ def _build_phase_timing_summary(
     if scheduler_type == "crux":
         observed = scheduler_debug_state.get("observed_comm_time_ms", {})
         phase_summary["job_comm_time_ms"] = max((float(value) for value in observed.values()), default=0.0)
+        scheduler_wall_time_ms = float(repetition_summary.get("crux_scheduler_wall_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("crux_communication_execution_time_ms", completion_time_ms) or completion_time_ms
+        )
+        end_to_end_time_ms = float(
+            repetition_summary.get("crux_end_to_end_time_ms", scheduler_wall_time_ms + communication_execution_time_ms)
+            or (scheduler_wall_time_ms + communication_execution_time_ms)
+        )
+        phase_summary["crux_path_selection_time_ms"] = float(repetition_summary.get("crux_path_selection_time_ms", 0.0) or 0.0)
+        phase_summary["crux_priority_assignment_time_ms"] = float(repetition_summary.get("crux_priority_assignment_time_ms", 0.0) or 0.0)
+        phase_summary["crux_priority_compression_time_ms"] = float(repetition_summary.get("crux_priority_compression_time_ms", 0.0) or 0.0)
+        phase_summary["crux_scheduler_wall_time_ms"] = scheduler_wall_time_ms
+        phase_summary["crux_communication_execution_time_ms"] = communication_execution_time_ms
+        phase_summary["crux_end_to_end_time_ms"] = end_to_end_time_ms
+        if scheduler_wall_time_ms > communication_execution_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "scheduler"
+        elif communication_execution_time_ms > scheduler_wall_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "communication"
+        else:
+            phase_summary["dominant_phase"] = "balanced"
     if scheduler_type == "teccl":
         epoch_size_ms = float((scheduler_debug_state.get("strategy") or {}).get("epoch_size_ms", 0.0) or 0.0)
         active_epochs = [item for item in schedule_history if int(item.get("epoch_action_count", 0)) > 0]

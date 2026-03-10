@@ -21,11 +21,15 @@ class RuntimeEngine:
     max_time_ms: float
     bandwidth_sharing_model: str = "max_min_fair"
     _link_lookup: dict[tuple[str, str], Link] = field(default_factory=dict, init=False)
+    _priority_aware_bandwidth_enabled: bool = field(default=False, init=False)
 
     def run(self, runtime: RuntimeState, scheduler: Scheduler, config: ExperimentConfig) -> RuntimeState:
         if self.bandwidth_sharing_model != "max_min_fair":
             raise ValueError(f"Unsupported bandwidth_sharing_model: {self.bandwidth_sharing_model}")
 
+        self._priority_aware_bandwidth_enabled = bool(
+            config.scheduler.type == "crux" and config.scheduler.crux.get("enable_priority_aware_bandwidth", True)
+        )
         self._link_lookup = self._build_link_lookup(runtime)
         self._initialize_link_states(runtime)
         self._push_event(runtime, runtime.now_ms, "schedule", {"reason": "initial", "force": True})
@@ -55,6 +59,7 @@ class RuntimeEngine:
 
         runtime.metadata["max_time_ms"] = config.simulation.max_time_ms
         runtime.metadata["bandwidth_sharing_model"] = config.simulation.bandwidth_sharing_model
+        runtime.metadata["priority_aware_bandwidth_enabled"] = self._priority_aware_bandwidth_enabled
         runtime.metadata["completed_flow_count"] = len(runtime.completed_flow_ids)
         runtime.metadata["completed_job_count"] = len(runtime.completed_job_ids)
         return runtime
@@ -245,17 +250,16 @@ class RuntimeEngine:
             for link_id in flow.traversed_link_ids:
                 runtime.link_states[link_id].active_flows.append(flow.flow_id)
 
-        for flow in active_flows:
-            if not flow.traversed_link_ids:
-                continue
-            fair_shares = []
-            for link_id in flow.traversed_link_ids:
-                link_state = runtime.link_states[link_id]
-                active_count = len(link_state.active_flows)
-                if active_count <= 0:
-                    continue
-                fair_shares.append(link_state.bandwidth_gbps / active_count)
-            flow.assigned_bandwidth_gbps = min(fair_shares) if fair_shares else 0.0
+        if self._priority_aware_bandwidth_enabled and runtime.metadata.get("scheduler_type") == "crux":
+            self._assign_priority_aware_bandwidth(runtime, active_flows)
+        else:
+            self._assign_group_max_min_fair(
+                runtime=runtime,
+                flows=active_flows,
+                residual_bandwidth_by_link={
+                    link_id: link_state.bandwidth_gbps for link_id, link_state in runtime.link_states.items()
+                },
+            )
 
         for link_state in runtime.link_states.values():
             if link_state.bandwidth_gbps <= 0:
@@ -268,6 +272,56 @@ class RuntimeEngine:
             )
             link_state.utilization = min(1.0, consumed / link_state.bandwidth_gbps)
         self._record_link_snapshot(runtime, reason="allocation")
+
+    def _assign_priority_aware_bandwidth(self, runtime: RuntimeState, active_flows: list[FlowState]) -> None:
+        residual_bandwidth_by_link = {
+            link_id: link_state.bandwidth_gbps
+            for link_id, link_state in runtime.link_states.items()
+        }
+        flows_by_priority: dict[int, list[FlowState]] = {}
+        for flow in active_flows:
+            priority = flow.priority if flow.priority is not None else (1 << 30)
+            flows_by_priority.setdefault(priority, []).append(flow)
+
+        for priority in sorted(flows_by_priority):
+            group_flows = flows_by_priority[priority]
+            self._assign_group_max_min_fair(
+                runtime=runtime,
+                flows=group_flows,
+                residual_bandwidth_by_link=residual_bandwidth_by_link,
+            )
+            for link_id in residual_bandwidth_by_link:
+                consumed = sum(
+                    flow.assigned_bandwidth_gbps
+                    for flow in group_flows
+                    if link_id in flow.traversed_link_ids
+                )
+                residual_bandwidth_by_link[link_id] = max(0.0, residual_bandwidth_by_link[link_id] - consumed)
+
+    def _assign_group_max_min_fair(
+        self,
+        runtime: RuntimeState,
+        flows: list[FlowState],
+        residual_bandwidth_by_link: dict[str, float],
+    ) -> None:
+        flow_count_by_link: dict[str, int] = {}
+        for flow in flows:
+            if not flow.traversed_link_ids:
+                continue
+            for link_id in flow.traversed_link_ids:
+                flow_count_by_link[link_id] = flow_count_by_link.get(link_id, 0) + 1
+
+        for flow in flows:
+            if not flow.traversed_link_ids:
+                flow.assigned_bandwidth_gbps = 0.0
+                continue
+            fair_shares: list[float] = []
+            for link_id in flow.traversed_link_ids:
+                active_count = flow_count_by_link.get(link_id, 0)
+                if active_count <= 0:
+                    continue
+                fair_shares.append(max(0.0, residual_bandwidth_by_link.get(link_id, 0.0)) / active_count)
+            flow.assigned_bandwidth_gbps = min(fair_shares) if fair_shares else 0.0
 
     def _estimate_next_completion_time(self, runtime: RuntimeState) -> float:
         completion_times: list[float] = []

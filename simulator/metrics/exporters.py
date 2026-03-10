@@ -9,6 +9,8 @@ from typing import Any
 from simulator.config.models import ExperimentConfig
 from simulator.core.models import LinkState
 from simulator.core.models import RuntimeState
+from simulator.schedulers.crux_metrics import build_crux_run_metrics
+from simulator.schedulers.crux_metrics import build_crux_scheduler_stats_payload
 
 
 def export_experiment_results(
@@ -51,6 +53,7 @@ def export_experiment_results(
         "aggregate_metrics": aggregate_summary,
         "repetitions": per_run_summaries,
     }
+    crux_scheduler_stats_payload = _build_crux_scheduler_stats_payload(experiment, run_records)
     teccl_solver_stats_payload = _build_teccl_solver_stats_payload(experiment, run_records)
 
     exported_files: dict[str, str] = {}
@@ -64,6 +67,10 @@ def export_experiment_results(
         exported_files["summary_json"] = str(summary_path)
         exported_files["scheduler_debug_json"] = str(scheduler_debug_path)
         exported_files["link_load_trace_json"] = str(link_trace_path)
+        if crux_scheduler_stats_payload is not None:
+            crux_scheduler_stats_path = output_dir / "crux_scheduler_stats.json"
+            crux_scheduler_stats_path.write_text(json.dumps(crux_scheduler_stats_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            exported_files["crux_scheduler_stats_json"] = str(crux_scheduler_stats_path)
         if teccl_solver_stats_payload is not None:
             teccl_solver_stats_path = output_dir / "teccl_solver_stats.json"
             teccl_solver_stats_path.write_text(json.dumps(teccl_solver_stats_payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -129,13 +136,13 @@ def _build_run_summary(
     }
     summary = dict(common_metrics)
     if experiment.scheduler.type == "crux":
-        summary.update(_build_crux_metrics(scheduler_debug_state))
+        summary.update(_build_crux_metrics(runtime, scheduler_debug_state))
     if experiment.scheduler.type == "teccl":
         summary.update(_build_teccl_metrics(scheduler_debug_state, schedule_history))
     return summary
 
 
-def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]:
+def _build_crux_metrics(runtime: RuntimeState, scheduler_debug_state: dict[str, Any]) -> dict[str, Any]:
     observed_comm_times = list((scheduler_debug_state.get("observed_comm_time_ms") or {}).values())
     intensity_scores = list((scheduler_debug_state.get("last_intensity_scores") or {}).values())
     priority_scores = list((scheduler_debug_state.get("last_priority_scores") or {}).values())
@@ -144,20 +151,27 @@ def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]
     compression = scheduler_debug_state.get("crux_priority_compression") or {}
     contention_dag = scheduler_debug_state.get("crux_contention_dag") or {}
     dag_metadata = contention_dag.get("metadata") or {}
+    metrics = build_crux_run_metrics(runtime, scheduler_debug_state)
     return {
+        "crux_priority_aware_bandwidth_enabled": bool(runtime.metadata.get("priority_aware_bandwidth_enabled", False)),
         "crux_avg_observed_comm_time_ms": mean(observed_comm_times) if observed_comm_times else 0.0,
         "crux_avg_intensity_score": mean(intensity_scores) if intensity_scores else 0.0,
         "crux_avg_priority_score": mean(priority_scores) if priority_scores else 0.0,
         "crux_path_assignment_count": len(scheduler_debug_state.get("last_path_assignments") or {}),
         "crux_priority_level_count": len(set(priority_assignments.values())),
-        "crux_scheduler_wall_time_ms": float(scheduler_debug_state.get("crux_scheduler_wall_time_ms", 0.0) or 0.0),
-        "crux_path_selection_time_ms": float(scheduler_debug_state.get("crux_path_selection_time_ms", 0.0) or 0.0),
-        "crux_priority_assignment_time_ms": float(scheduler_debug_state.get("crux_priority_assignment_time_ms", 0.0) or 0.0),
-        "crux_priority_compression_time_ms": float(scheduler_debug_state.get("crux_priority_compression_time_ms", 0.0) or 0.0),
+        "crux_scheduler_wall_time_ms": float(metrics.get("crux_scheduler_wall_time_ms", 0.0) or 0.0),
+        "crux_path_selection_time_ms": float(metrics.get("crux_path_selection_time_ms", 0.0) or 0.0),
+        "crux_priority_assignment_time_ms": float(metrics.get("crux_priority_assignment_time_ms", 0.0) or 0.0),
+        "crux_priority_compression_time_ms": float(metrics.get("crux_priority_compression_time_ms", 0.0) or 0.0),
+        "crux_communication_execution_time_ms": float(metrics.get("crux_communication_execution_time_ms", 0.0) or 0.0),
+        "crux_end_to_end_time_ms": float(metrics.get("crux_end_to_end_time_ms", 0.0) or 0.0),
         "crux_model_job_count": int(crux_model_summary.get("job_count", 0) or 0),
         "crux_model_flow_count": int(crux_model_summary.get("flow_count", 0) or 0),
         "crux_model_path_candidate_count": int(crux_model_summary.get("path_candidate_count", 0) or 0),
         "crux_model_selected_path_count": int(crux_model_summary.get("selected_path_count", 0) or 0),
+        "crux_model_unique_link_count": int(metrics.get("unique_link_count", 0) or 0),
+        "crux_overlapping_link_pair_count": int(metrics.get("overlapping_link_pair_count", 0) or 0),
+        "crux_priority_level_count_raw": int(metrics.get("priority_level_count_raw", 0) or 0),
         "crux_hardware_priority_count": int(crux_model_summary.get("hardware_priority_count", 0) or 0),
         "crux_average_priority_score": float(crux_model_summary.get("average_priority_score", 0.0) or 0.0),
         "crux_contention_dag_node_count": int(dag_metadata.get("node_count", 0) or 0),
@@ -165,7 +179,23 @@ def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]
         "crux_total_cut_weight": float(compression.get("total_cut_weight", 0.0) or 0.0),
         "crux_lost_cut_weight": float(compression.get("lost_cut_weight", 0.0) or 0.0),
         "crux_topological_order_sample_count": int(compression.get("topological_order_sample_count", 0) or 0),
+        "crux_average_high_priority_flow_completion_time_ms": float(metrics.get("average_high_priority_flow_completion_time_ms", 0.0) or 0.0),
+        "crux_average_low_priority_flow_completion_time_ms": float(metrics.get("average_low_priority_flow_completion_time_ms", 0.0) or 0.0),
+        "crux_priority_execution_gain_ratio": float(metrics.get("priority_execution_gain_ratio", 0.0) or 0.0),
     }
+
+
+def _build_crux_scheduler_stats_payload(
+    experiment: ExperimentConfig,
+    run_records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if experiment.scheduler.type != "crux":
+        return None
+    return build_crux_scheduler_stats_payload(
+        experiment_name=experiment.meta.name,
+        scheduler_type=experiment.scheduler.type,
+        run_records=run_records,
+    )
 
 
 def _build_teccl_metrics(
@@ -312,6 +342,7 @@ def _build_flow_rows(repetition_index: int, runtime: RuntimeState) -> list[dict[
                 "total_size_mb": flow.total_size_mb,
                 "remaining_size_mb": flow.remaining_size_mb,
                 "assigned_bandwidth_gbps": flow.assigned_bandwidth_gbps,
+                "priority": flow.priority if flow.priority is not None else "",
                 "path": "->".join(flow.path),
                 "scheduler": flow.metadata.get("scheduler", ""),
                 "chunk_id": flow.chunk_id or "",

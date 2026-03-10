@@ -1,5 +1,7 @@
 """Scheduler implementations for CRUX and TE-CCL."""
 
+from simulator.schedulers.crux_metrics import build_crux_run_metrics
+from simulator.schedulers.crux_metrics import build_crux_scheduler_stats_payload
 from simulator.schedulers.teccl_indexing import TECCLCommodity
 from simulator.schedulers.teccl_indexing import TECCLDirectedEdge
 from simulator.schedulers.teccl_indexing import TECCLEpoch
@@ -49,6 +51,8 @@ __all__ = [
 	"TECCLVariableBundle",
 	"TECCLExecutionPlan",
 	"TECCLPlannedTransfer",
+	"build_crux_run_metrics",
+	"build_crux_scheduler_stats_payload",
 	"build_commodity_index",
 	"build_directed_edge_index",
 	"build_epoch_index",

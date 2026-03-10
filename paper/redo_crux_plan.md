@@ -503,6 +503,14 @@ CRUX 结果中必须新增以下指标：
 
 ### 阶段 4：priority-aware runtime 落地
 
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. `RuntimeEngine` 已在 CRUX 模式下支持 priority-aware bandwidth allocation：高优先级组先占用链路残余带宽，低优先级组仅消费剩余容量。
+2. 同一优先级组内部仍保持现有的 max-min fair 近似，不改变 TE-CCL 与非 CRUX 场景的运行契约。
+3. 运行时会在 metadata 中导出 `priority_aware_bandwidth_enabled`，并可通过 `scheduler.crux.enable_priority_aware_bandwidth` 显式开关。
+
 目标：让 CRUX 的优先级在运行时真正生效。
 
 工作内容：
@@ -518,6 +526,15 @@ CRUX 结果中必须新增以下指标：
 2. 不会破坏 CRUX 之外调度器的现有运行契约。
 
 ### 阶段 5：统计与导出链路接入
+
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. 新增 `simulator/schedulers/crux_metrics.py`，统一计算 CRUX 的构建时间、执行时间、图规模、cut 统计和优先级执行效果指标。
+2. `summary.json` 已补充 `crux_communication_execution_time_ms`、`crux_end_to_end_time_ms`、`crux_overlapping_link_pair_count`、`crux_priority_execution_gain_ratio` 等阶段 5 指标。
+3. JSON 导出已新增独立产物 `crux_scheduler_stats.json`，用于完整保存每次 repetition 的 CRUX profiling 与压缩统计。
+4. `flow_trace.csv` 已补充 `priority` 字段，便于后续验证高低优先级流的执行差异。
 
 目标：补齐 CRUX 的构建时间、图规模、压缩统计和执行效果导出。
 
