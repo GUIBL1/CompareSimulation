@@ -1,538 +1,407 @@
-下面是把论文 **Crux: GPU-Efficient Communication Scheduling for Deep Learning Training**（SIGCOMM 2024）工程化后的 **NS-3 / Python 可实现版本设计文档**。
-所有算法逻辑均严格来自论文方法部分，并将数学符号转换为可实现的数据结构和事件驱动流程。
-
-文中引用论文内容时使用 `filecite` 标注。
+下面给出**基于论文《Crux: GPU-Efficient Communication Scheduling for Deep Learning Training》（SIGCOMM 2024）内容整理的实现建模**。
+所有概念、变量和公式均来自论文正文（尤其是 §3 Methodology 与 §4 Crux Design），并用 **中文 + LaTeX 公式**表达，可直接用于论文或技术文档。
 
 ---
 
-# 一、方法工程化概述
+# Crux通信调度模型（来自论文《Crux》）
 
-| 项目   | 内容                                                                            |
-| ---- | ----------------------------------------------------------------------------- |
-| 方法名称 | **Crux: GPU Intensity-Aware Communication Scheduler**                         |
-| 核心思想 | 使用 **GPU Intensity (GPU计算强度)** 对DLT作业排序，通过 **路径选择 + 优先级调度 + 优先级压缩** 减少多作业通信竞争 |
-| 优化目标 | 最大化 **GPU Utilization**                                                       |
-| 调度粒度 | Job级通信流 (coflow-like scheduling)                                              |
-| 主要机制 | Path Selection / Priority Assignment / Priority Compression                   |
+## 1 问题定义
 
-论文证明：
-最大化 GPU Utilization 等价于 **最大化链路上传输的 GPU intensity 总和**。 
+在多租户深度学习训练集群中，多个深度学习训练作业（DLT jobs）会同时运行并共享网络资源。不同作业在同步阶段（例如 AllReduce）会产生大量通信流，这些通信流会在数据中心网络中产生 **communication contention（通信争用）**。
 
----
+通信争用会增加每个训练迭代的执行时间，从而降低 GPU 计算利用率。设集群中作业集合为
 
-# 二、系统模型（可实现抽象）
+$$
+J = {j_1, j_2, \dots, j_n}
+$$
 
-## 2.1 网络模型
+每个作业在每一轮训练迭代中包含：
 
-```text
-Network Graph G = (V, E)
+1. 计算阶段（computation phase）
+2. 通信阶段（communication phase）
 
-V : GPUs / Hosts
-E : Links (NVLink, PCIe, Ethernet)
-Be : bandwidth of link e
-```
+若通信阶段因争用而延长，则 GPU 在等待通信完成时会处于空闲状态，从而降低整体 GPU 利用率。
 
-DLT Job:
+Crux 的目标是：
 
-```text
-job j ∈ J
-```
+$$
+\max ; U
+$$
 
-属性：
+其中
 
-| 符号   | 代码变量               | 含义            |
-| ---- | ------------------ | ------------- |
-| Wj   | compute_workload   | 每iteration计算量 |
-| Mj,e | traffic_on_link[e] | 每iteration流量  |
-| tj   | comm_time          | 最慢链路通信时间      |
-| Ij   | gpu_intensity      | GPU强度         |
+$$
+U
+$$
 
-公式：
+表示整个集群的 GPU computation utilization。
 
-```
-t_j = max_e ( M_j,e / B_e )
+论文指出：
 
-I_j = W_j / t_j
-```
+> 最大化 GPU utilization 是一个 NP-Complete 问题。
 
-即：
-
-```python
-gpu_intensity = compute_workload / comm_time
-```
-
-GPU intensity 表示：
-
-> 每单位通信时间能释放多少GPU计算。 
+因此 Crux 将该问题转化为 **GPU 强度感知通信调度问题**。
 
 ---
 
-# 三、输入参数设计
+# 2 GPU 强度（GPU Intensity）
 
-| 参数                  | 类型           | 默认           | 说明                |
-| ------------------- | ------------ | ------------ | ----------------- |
-| topology            | Graph        | Clos         | DCN拓扑             |
-| max_priority_levels | int          | 8            | NIC/交换机DSCP等级     |
-| probing_interval    | float        | 30s          | GPU intensity测量窗口 |
-| scheduling_interval | float        | event-driven | 调度触发              |
-| job_list            | List[DLTJob] | —            | 当前运行作业            |
+Crux 引入 **GPU intensity** 来刻画作业对 GPU 利用率的影响。
 
----
+对于作业 $j$，定义：
 
-# 四、核心数据结构设计
+$$
+I_j = \frac{W_j}{t_j}
+$$
 
-## 4.1 Job
+其中：
 
-```python
-class DLTJob:
-    job_id: int
-    num_gpus: int
-    
-    compute_workload: float
-    comm_time: float
-    
-    gpu_intensity: float
-    
-    iteration_time: float
-    
-    flows: List['Flow']
-    
-    assigned_path: List[int]
-    
-    priority: int
-```
+* $W_j$ ：作业 $j$ 在一次迭代中的 **计算工作量**
+* $t_j$ ：作业 $j$ **最大通信传输时间**
 
----
-
-## 4.2 Flow
-
-```python
-class Flow:
-    flow_id: int
-    
-    src: int
-    dst: int
-    
-    size_bytes: float
-    
-    job_id: int
-    
-    path: List[int]
-    
-    priority: int
-```
-
----
-
-## 4.3 Network State
-
-```python
-class NetworkState:
-    
-    link_bandwidth: Dict[Link, float]
-    
-    link_load: Dict[Link, float]
-    
-    candidate_paths: Dict[(src,dst), List[List[Node]]]
-```
-
----
-
-# 五、算法1：GPU Intensity计算
-
-Crux需要先测量作业的计算量与通信时间。
-
-论文做法：
-
-1. 给新job **最高优先级**
-2. 运行若干iteration
-3. 采样GPU和NIC统计
-
-得到：
-
-```
-Wj
-tj
-```
-
-然后：
-
-```
-Ij = Wj / tj
-```
-
----
-
-## 伪代码
-
-```python
-def measure_gpu_intensity(job: DLTJob, monitor_window: float) -> float:
-    
-    # Step1 赋予最高优先级避免干扰
-    job.priority = MAX_PRIORITY
-    
-    compute_workload = 0.0
-    comm_time = 0.0
-    
-    start = now()
-    
-    while now() - start < monitor_window:
-        
-        compute_workload += read_gpu_flops(job)
-        
-        comm_time += measure_network_transfer_time(job)
-    
-    job.compute_workload = compute_workload
-    
-    job.comm_time = comm_time
-    
-    job.gpu_intensity = compute_workload / comm_time
-    
-    return job.gpu_intensity
-```
-
----
-
-# 六、算法2：GPU Intensity Path Selection
-
-论文 §4.1：
-
-核心思想：
-
-1. **按 GPU intensity 降序排序 job**
-2. 每个job选择 **最不拥塞路径**
-3. 高强度job尽量走不同路径
-
-> Crux从 GPU intensity 最大的作业开始选择路径，并为其选择当前最不拥塞路径。 
-
----
-
-## 路径拥塞度计算
-
-```
-path_cost = Σ (link_load / link_capacity)
-```
-
-或
-
-```
-max_link_utilization
-```
-
----
-
-## 伪代码
-
-```python
-def path_selection(jobs: List[DLTJob], net: NetworkState):
-    
-    # Step1 按 GPU intensity 排序
-    jobs_sorted = sorted(jobs, key=lambda j: j.gpu_intensity, reverse=True)
-    
-    for job in jobs_sorted:
-        
-        best_path = None
-        best_cost = INF
-        
-        for path in get_candidate_paths(job):
-            
-            cost = compute_path_congestion(path, net)
-            
-            if cost < best_cost:
-                
-                best_cost = cost
-                
-                best_path = path
-        
-        job.assigned_path = best_path
-        
-        reserve_path_capacity(best_path, job)
-```
-
----
-
-# 七、算法3：Priority Assignment
-
-论文发现：
-
-只用 GPU intensity 排序会出现：
-
-* 网络 burst
-* iteration不同步
-
-因为：
-
-DLT具有：
-
-* **iteration周期**
-* **communication-computation overlap**
-
-所以要 **微调 priority**。
-
-论文策略：
-
-```
-priority = f(GPU_intensity, iteration_time, overlap_pattern)
-```
-
-核心目标：
-
-让网络负载 **时间上均匀分布**。 
-
----
-
-## 工程化近似实现
-
-定义：
-
-```
-priority_score =
-    α * normalized_gpu_intensity
-  + β * iteration_frequency
-```
-
----
-
-## 伪代码
-
-```python
-def assign_priorities(jobs: List[DLTJob]):
-    
-    for job in jobs:
-        
-        intensity_score = normalize(job.gpu_intensity)
-        
-        iteration_score = 1.0 / job.iteration_time
-        
-        job.priority_score = (
-            ALPHA * intensity_score +
-            BETA * iteration_score
-        )
-    
-    jobs_sorted = sorted(
-        jobs,
-        key=lambda j: j.priority_score,
-        reverse=True
-    )
-    
-    for i, job in enumerate(jobs_sorted):
-        
-        job.priority = i
-```
-
----
-
-# 八、算法4：Priority Compression
-
-现实网络：
-
-```
-priority levels <= 8
-```
-
-但job可能几十个。
-
-Crux策略：
-
-优先保留：
-
-```
-high-intensity jobs
-shared-path jobs
-```
-
-压缩：
-
-```
-low-impact jobs
-```
-
----
-
-## 伪代码
-
-```python
-def compress_priorities(jobs: List[DLTJob], max_levels: int):
-    
-    jobs_sorted = sorted(jobs, key=lambda j: j.priority)
-    
-    n = len(jobs_sorted)
-    
-    bucket_size = ceil(n / max_levels)
-    
-    for i, job in enumerate(jobs_sorted):
-        
-        level = i // bucket_size
-        
-        job.priority = min(level, max_levels-1)
-```
-
----
-
-# 九、完整调度流程（系统主循环）
-
-Crux是 **事件驱动调度器**：
-
-触发条件：
-
-```
-JobArrival
-JobCompletion
-PeriodicUpdate
-```
-
----
-
-## 总调度器
-
-```python
-class CruxScheduler:
-    
-    def __init__(self, topology: Graph):
-        
-        self.network = NetworkState(topology)
-        
-        self.jobs: Dict[int, DLTJob] = {}
-    
-    def handle_job_arrival(self, job: DLTJob):
-        
-        self.jobs[job.job_id] = job
-        
-        measure_gpu_intensity(job)
-        
-        self.reschedule()
-    
-    
-    def handle_job_completion(self, job_id: int):
-        
-        del self.jobs[job_id]
-        
-        self.reschedule()
-    
-    
-    def reschedule(self):
-        
-        jobs = list(self.jobs.values())
-        
-        # Step1 path selection
-        path_selection(jobs, self.network)
-        
-        # Step2 priority assignment
-        assign_priorities(jobs)
-        
-        # Step3 priority compression
-        compress_priorities(jobs, MAX_PRIORITY_LEVEL)
-        
-        # Step4 install rules
-        self.install_network_rules(jobs)
-    
-    
-    def install_network_rules(self, jobs: List[DLTJob]):
-        
-        for job in jobs:
-            
-            set_flow_path(job)
-            
-            set_dscp_priority(job)
-```
-
----
-
-# 十、NS-3实现映射
-
-| Crux组件          | NS-3模块                            |
-| --------------- | --------------------------------- |
-| Path Selection  | `Ipv4RoutingProtocol`             |
-| Flow Priority   | `TrafficControlLayer / QueueDisc` |
-| DSCP            | `Ipv4Header::SetTos()`            |
-| Link congestion | `NetDeviceQueue`                  |
-| Scheduler       | 自定义 `CruxController`              |
-
----
-
-# 十一、NS-3事件处理
-
-```python
-PacketArrival
-FlowStart
-FlowFinish
-JobArrival
-JobCompletion
-PeriodicStatsUpdate
-```
-
----
-
-# 十二、Python原型（简化）
-
-推荐架构：
-
-```
-simulator/
-    topology.py
-    job.py
-    flow.py
-    crux_scheduler.py
-    traffic_generator.py
-```
-
-核心循环：
-
-```python
-while sim_running:
-    
-    event = event_queue.pop()
-    
-    if event.type == JOB_ARRIVAL:
-        scheduler.handle_job_arrival(event.job)
-    
-    elif event.type == JOB_FINISH:
-        scheduler.handle_job_completion(event.job_id)
-    
-    elif event.type == PACKET_ARRIVAL:
-        forward_packet(event.packet)
-```
-
----
-
-# 十三、复杂度分析
-
-| 模块                   | 复杂度           |
-| -------------------- | ------------- |
-| GPU intensity测量      | O(iterations) |
-| path selection       | O(J * P)      |
-| priority assignment  | O(J log J)    |
-| priority compression | O(J)          |
-
-J = jobs
-P = candidate paths
-
----
-
-# 十四、Crux核心直觉（论文精华）
-
-论文关键洞察：
-
-```
-GPU Utilization ∝
-Σ (GPU intensity × communication duration)
-```
+$t_j$ 定义为该作业通信流中最慢链路的传输时间。
 
 因此：
 
-**让高GPU intensity job优先通信**
+$$
+I_j
+$$
 
-即可最大化GPU计算释放。 
+反映了作业计算与通信之间的比例关系。
+
+直观解释：
+
+* $I_j$ 大 → 计算占比高 → GPU 密集型作业
+* $I_j$ 小 → 通信占比高 → 网络密集型作业
+
+论文证明：
+
+> 在单链路场景下，最大化 GPU utilization 等价于最大化被调度流的 GPU intensity 总和。
+
+因此 Crux 的核心策略是：
+
+$$
+\text{优先调度 } I_j \text{ 高的通信流}
+$$
 
 ---
 
-# 十五、如果你要在 NS-3 做这篇论文复现
+# 3 Crux 系统设计
 
-我可以进一步帮你写：
+Crux 的通信调度包含三个核心组件：
 
-1️⃣ **完整 NS-3 Crux module 设计（类结构）**
-2️⃣ **FatTree DCN 仿真实验脚本**
-3️⃣ **与 CASSINI / Sincronia 对比实验框架**
-4️⃣ **SIGCOMM论文复现级代码架构**
+1. GPU 强度感知路径选择
+2. 优先级分配（Priority Assignment）
+3. 优先级压缩（Priority Compression）
 
-如果需要，我可以直接给你 **一份接近 1000 行的 NS-3 Crux 调度器框架代码**。
+---
+
+# 4 GPU 强度感知路径选择
+
+在 Clos 或 Fat-tree 数据中心网络中，同一对主机之间通常存在多条等价路径。传统 ECMP 会通过哈希随机选择路径，这可能导致多个高 GPU 强度作业被映射到同一链路，从而产生严重争用。
+
+Crux 的路径选择策略如下：
+
+1. 将所有作业按 GPU intensity 降序排序
+
+$$
+I_{j_1} \ge I_{j_2} \ge \dots \ge I_{j_n}
+$$
+
+2. 按顺序为作业选择路径
+
+对于作业 $j$，在所有可用路径集合
+
+$$
+P_j = {p_1,p_2,\dots,p_m}
+$$
+
+中选择当前 **最不拥塞的路径**
+
+$$
+p^* = \arg\min_{p \in P_j} ; L(p)
+$$
+
+其中：
+
+$$
+L(p)
+$$
+
+表示路径 $p$ 当前的链路负载。
+
+该策略保证：
+
+* 高 GPU 强度作业优先获得低拥塞路径
+* 减少高强度作业之间的争用
+
+---
+
+# 5 优先级分配（Priority Assignment）
+
+仅根据 GPU intensity 排序仍然不够，因为不同作业具有：
+
+* 不同的迭代周期
+* 不同的通信模式
+* 不同的计算通信重叠程度
+
+因此 Crux 引入 **修正因子**
+
+$$
+k_j
+$$
+
+用于调整 GPU intensity。
+
+最终优先级定义为
+
+$$
+P_j = k_j \cdot I_j
+$$
+
+其中
+
+* $P_j$ ：作业 $j$ 的通信优先级
+* $k_j$ ：DLT 特性感知修正因子
+
+优先级排序为
+
+$$
+P_{j_1} \ge P_{j_2} \ge \dots
+$$
+
+通信调度时：
+
+* 优先级高的流优先发送
+* 优先级低的流在拥塞时让出带宽
+
+---
+
+# 6 通信争用 DAG（Communication Contention DAG）
+
+由于硬件 NIC 和交换机仅支持有限数量的优先级队列（通常约 8 个），需要将大量作业优先级压缩为少量硬件优先级。
+
+为此 Crux 构建 **通信争用 DAG**。
+
+定义图：
+
+$$
+G=(V,E)
+$$
+
+其中
+
+* 节点集合
+
+$$
+V = J
+$$
+
+每个节点表示一个作业。
+
+若两个作业共享同一链路，则存在潜在争用。
+
+对于优先级
+
+$$
+P_{j_1} > P_{j_2}
+$$
+
+构建有向边
+
+$$
+j_1 \rightarrow j_2
+$$
+
+边权定义为
+
+$$
+w_{j_1,j_2} = I_{j_1}
+$$
+
+含义：
+
+如果两个作业被压缩到同一硬件优先级，则可能导致高强度作业 $j_1$ 的 GPU 利用率下降，该损失与 $I_{j_1}$ 成正比。
+
+因此 DAG 表示 **潜在 GPU 利用率损失模型**。
+
+---
+
+# 7 优先级压缩问题
+
+设可用硬件优先级数为
+
+$$
+K
+$$
+
+需要将作业集合
+
+$$
+J
+$$
+
+划分为
+
+$$
+K
+$$
+
+个优先级集合
+
+$$
+{J_1,J_2,\dots,J_K}
+$$
+
+约束：
+
+若
+
+$$
+P_{j_1} > P_{j_2}
+$$
+
+则
+
+$$
+priority(J_{j_1}) \ge priority(J_{j_2})
+$$
+
+优化目标：
+
+最小化 GPU 利用率损失。
+
+等价于：
+
+$$
+\max \sum_{(u,v)\in E_{cut}} w_{u,v}
+$$
+
+即最大化被 **cut 的边权重总和**。
+
+该问题可转化为 **Max K-Cut on DAG**。
+
+---
+
+# 8 基于拓扑排序的动态规划算法
+
+由于 DAG 可能存在多个拓扑序，Crux 采用如下方法求解近似最优解。
+
+首先对 DAG 进行拓扑排序：
+
+$$
+(a_1,a_2,\dots,a_n)
+$$
+
+在该序列中所有边均从左指向右。
+
+将问题转化为 **序列连续分割问题**。
+
+定义
+
+$$
+f(i,k)
+$$
+
+表示：
+
+对前 $i$ 个作业划分为 $k$ 段时能够获得的最大 cut 权重。
+
+递推公式为
+
+$$
+f(i,k) = \max_{j < i} \left( f(j,k-1) + C_{j,i} \right)
+$$
+
+其中
+
+$$
+C_{j,i}
+$$
+
+表示从前 $j$ 个节点指向区间
+
+$$
+{a_{j+1},\dots,a_i}
+$$
+
+的所有边权之和。
+
+最终解为
+
+$$
+f(n,K)
+$$
+
+---
+
+# 9 多拓扑序采样
+
+一个 DAG 可能存在多个拓扑排序。
+
+Crux 的算法流程为：
+
+1. 随机生成多个拓扑序列
+2. 对每个序列运行上述动态规划
+3. 选择 cut 权重最大的结果
+
+最终得到优先级划分
+
+$$
+{J_1,J_2,\dots,J_K}
+$$
+
+并将其映射到硬件优先级队列。
+
+---
+
+# 10 调度执行
+
+最终通信调度通过以下方式执行：
+
+1. 使用路径选择算法确定通信路径
+2. 根据优先级设置网络流优先级
+3. 将作业映射到硬件优先级队列
+4. NIC 与交换机按优先级调度数据包
+
+这样可以：
+
+* 优先保证高 GPU 强度作业通信
+* 降低通信争用
+* 提高 GPU 利用率
+
+---
+
+# 11 Crux建模总结
+
+Crux 的核心建模可总结为：
+
+**输入**
+
+* 作业计算负载 $W_j$
+* 通信时间 $t_j$
+* 网络拓扑
+* 可用路径
+* 硬件优先级数量 $K$
+
+**核心指标**
+
+$$
+I_j = \frac{W_j}{t_j}
+$$
+
+**优先级**
+
+$$
+P_j = k_j I_j
+$$
+
+**优化目标**
+
+最大化 GPU 利用率
+
+**关键技术**
+
+1. GPU 强度感知路径选择
+2. DLT 特性感知优先级分配
+3. 基于 DAG 的优先级压缩

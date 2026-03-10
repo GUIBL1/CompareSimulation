@@ -164,8 +164,11 @@ def _validate_experiment_config(config: ExperimentConfig, path: Path) -> None:
 
     if config.scheduler.type == "crux":
         _require(
-            "max_priority_levels" in config.scheduler.crux,
-            f"Experiment scheduler.crux.max_priority_levels is required when scheduler.type=crux in {path}",
+            "max_priority_levels" in config.scheduler.crux or "hardware_priority_count" in config.scheduler.crux,
+            (
+                "Experiment scheduler.crux.max_priority_levels or "
+                f"scheduler.crux.hardware_priority_count is required when scheduler.type=crux in {path}"
+            ),
         )
 
     if config.scheduler.type == "teccl":

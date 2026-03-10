@@ -139,11 +139,18 @@ def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]
     observed_comm_times = list((scheduler_debug_state.get("observed_comm_time_ms") or {}).values())
     intensity_scores = list((scheduler_debug_state.get("last_intensity_scores") or {}).values())
     priority_assignments = scheduler_debug_state.get("last_priority_assignments") or {}
+    crux_model_summary = scheduler_debug_state.get("crux_model_summary") or {}
     return {
         "crux_avg_observed_comm_time_ms": mean(observed_comm_times) if observed_comm_times else 0.0,
         "crux_avg_intensity_score": mean(intensity_scores) if intensity_scores else 0.0,
         "crux_path_assignment_count": len(scheduler_debug_state.get("last_path_assignments") or {}),
         "crux_priority_level_count": len(set(priority_assignments.values())),
+        "crux_scheduler_wall_time_ms": float(scheduler_debug_state.get("crux_scheduler_wall_time_ms", 0.0) or 0.0),
+        "crux_model_job_count": int(crux_model_summary.get("job_count", 0) or 0),
+        "crux_model_flow_count": int(crux_model_summary.get("flow_count", 0) or 0),
+        "crux_model_path_candidate_count": int(crux_model_summary.get("path_candidate_count", 0) or 0),
+        "crux_hardware_priority_count": int(crux_model_summary.get("hardware_priority_count", 0) or 0),
+        "crux_average_priority_score": float(crux_model_summary.get("average_priority_score", 0.0) or 0.0),
     }
 
 

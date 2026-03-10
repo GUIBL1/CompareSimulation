@@ -112,8 +112,11 @@ def _build_experiment_document(spec: dict[str, Any]) -> dict[str, Any]:
 def _default_crux_scheduler_block(overrides: dict[str, Any] | None) -> dict[str, Any]:
     block = {
         "max_priority_levels": 4,
+        "hardware_priority_count": 4,
         "candidate_path_limit": 4,
         "intensity_window_iterations": 3,
+        "intensity_definition_mode": "legacy_observed_comm_time_proxy",
+        "priority_factor_mode": "neutral",
     }
     if overrides:
         block.update(overrides)
