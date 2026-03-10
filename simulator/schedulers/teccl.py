@@ -4,15 +4,26 @@ from collections import deque
 import hashlib
 from dataclasses import dataclass, field
 from math import ceil
+from time import perf_counter
 from typing import Any
 
 from simulator.core.models import RuntimeState
 from simulator.schedulers.base import EpochAction
 from simulator.schedulers.base import ScheduleDecision
 from simulator.schedulers.base import Scheduler
+from simulator.schedulers.teccl_highs_backend import TECCLHighsSolveConfig
+from simulator.schedulers.teccl_highs_backend import solve_teccl_milp
+from simulator.schedulers.teccl_metrics import build_teccl_solver_stats
+from simulator.schedulers.teccl_milp_builder import TECCLMILPBuildConfig
+from simulator.schedulers.teccl_milp_builder import build_teccl_milp_model
+from simulator.schedulers.teccl_model_input import build_teccl_model_input
+from simulator.schedulers.teccl_model_input import infer_planning_horizon_epochs
+from simulator.schedulers.teccl_runtime_adapter import build_teccl_plan_decision
 from simulator.schedulers.teccl_solver import ExactMILPTECCLSolver
 from simulator.schedulers.teccl_solver import HeuristicTECCLSolver
 from simulator.schedulers.teccl_solver import SmallScaleDebugSolver
+from simulator.schedulers.teccl_solution_decoder import TECCLExecutionPlan
+from simulator.schedulers.teccl_solution_decoder import decode_teccl_solution
 from simulator.workload.models import UnifiedJob
 
 
@@ -46,6 +57,14 @@ class TECCLStrategy:
     epoch_size_ms: float = 1.0
     solver_backend: str = "small_scale_debug_solver"
     max_solver_time_ms: int = 1000
+    planning_horizon_epochs: int | None = None
+    mip_gap: float | None = None
+    solver_threads: int | None = None
+    enforce_integrality: bool = True
+    objective_mode: str = "weighted_early_completion"
+    switch_buffer_policy: str = "zero"
+    solver_log_to_console: bool = False
+    extract_all_variable_values: bool = True
     allow_gpu_replication: bool = True
     allow_switch_replication: bool = False
     enable_gpu_buffer: bool = True
@@ -58,6 +77,10 @@ class TECCLScheduler(Scheduler):
     pending_jobs: list[str] = field(default_factory=list)
     job_states: dict[str, TECCLJobState] = field(default_factory=dict)
     last_solver_report: dict[str, object] = field(default_factory=dict)
+    planned_execution: TECCLExecutionPlan | None = None
+    emitted_plan_epochs: set[int] = field(default_factory=set)
+    teccl_solver_stats: dict[str, object] = field(default_factory=dict)
+    planner_model_summary: dict[str, object] = field(default_factory=dict)
 
     def on_workload_arrival(self, job: UnifiedJob, runtime_state: RuntimeState) -> None:
         if job.job_id not in self.pending_jobs:
@@ -72,6 +95,8 @@ class TECCLScheduler(Scheduler):
 
     def compute_schedule(self, runtime_state: RuntimeState) -> ScheduleDecision:
         current_epoch = int(ceil(runtime_state.now_ms / self.strategy.epoch_size_ms))
+        if self.strategy.solver_backend == "highs":
+            return self._compute_planned_schedule(runtime_state, current_epoch)
         epoch_actions: list[EpochAction] = []
         solver_reports: dict[str, object] = {}
         for job in runtime_state.active_jobs:
@@ -130,6 +155,12 @@ class TECCLScheduler(Scheduler):
             "strategy": {
                 "epoch_size_ms": self.strategy.epoch_size_ms,
                 "solver_backend": self.strategy.solver_backend,
+                "planning_horizon_epochs": self.strategy.planning_horizon_epochs,
+                "mip_gap": self.strategy.mip_gap,
+                "solver_threads": self.strategy.solver_threads,
+                "enforce_integrality": self.strategy.enforce_integrality,
+                "objective_mode": self.strategy.objective_mode,
+                "switch_buffer_policy": self.strategy.switch_buffer_policy,
                 "allow_gpu_replication": self.strategy.allow_gpu_replication,
                 "allow_switch_replication": self.strategy.allow_switch_replication,
                 "enable_gpu_buffer": self.strategy.enable_gpu_buffer,
@@ -137,6 +168,89 @@ class TECCLScheduler(Scheduler):
             },
             "job_states": self._build_debug_job_summary(),
             "solver_reports": dict(self.last_solver_report),
+            "teccl_solver_stats": dict(self.teccl_solver_stats),
+            "teccl_plan_summary": {
+                "planned_transfer_count": len(self.planned_execution.all_transfers) if self.planned_execution else 0,
+                "planned_epoch_count": len(self.planned_execution.transfers_by_epoch) if self.planned_execution else 0,
+                "emitted_epoch_count": len(self.emitted_plan_epochs),
+                "planner_model_summary": dict(self.planner_model_summary),
+            },
+        }
+
+    def _compute_planned_schedule(self, runtime_state: RuntimeState, current_epoch: int) -> ScheduleDecision:
+        if self.planned_execution is None:
+            self._build_planned_execution(runtime_state)
+        decision = build_teccl_plan_decision(
+            plan=self.planned_execution,
+            current_epoch=current_epoch,
+            decision_time_ms=runtime_state.now_ms,
+            epoch_size_ms=self.strategy.epoch_size_ms,
+            solver_stats=self.teccl_solver_stats,
+            emitted_epochs=self.emitted_plan_epochs,
+        )
+        if decision.epoch_actions:
+            self.emitted_plan_epochs.add(current_epoch)
+        return decision
+
+    def _build_planned_execution(self, runtime_state: RuntimeState) -> None:
+        planning_horizon_epochs = self.strategy.planning_horizon_epochs
+        if planning_horizon_epochs is None:
+            planning_horizon_epochs = infer_planning_horizon_epochs(
+                jobs=runtime_state.active_jobs,
+                topology=runtime_state.topology,
+                epoch_size_ms=self.strategy.epoch_size_ms,
+            )
+
+        wall_start = perf_counter()
+        build_start = perf_counter()
+        model_input = build_teccl_model_input(
+            topology=runtime_state.topology,
+            jobs=runtime_state.active_jobs,
+            epoch_size_ms=self.strategy.epoch_size_ms,
+            planning_horizon_epochs=planning_horizon_epochs,
+        )
+        build_result = build_teccl_milp_model(
+            model_input=model_input,
+            config=TECCLMILPBuildConfig(
+                enforce_integrality=self.strategy.enforce_integrality,
+                objective_mode=self.strategy.objective_mode,
+                switch_buffer_policy=self.strategy.switch_buffer_policy,
+            ),
+        )
+        model_build_time_ms = (perf_counter() - build_start) * 1000.0
+        solve_result = solve_teccl_milp(
+            build_result=build_result,
+            config=TECCLHighsSolveConfig(
+                max_solver_time_ms=self.strategy.max_solver_time_ms,
+                mip_gap=self.strategy.mip_gap,
+                solver_threads=self.strategy.solver_threads,
+                log_to_console=self.strategy.solver_log_to_console,
+                extract_all_variable_values=self.strategy.extract_all_variable_values,
+            ),
+        )
+        if solve_result.model_status not in {"Optimal", "Feasible"}:
+            raise ValueError(f"HiGHS planner did not produce an executable TE-CCL plan: {solve_result.model_status}")
+        total_wall_time_ms = (perf_counter() - wall_start) * 1000.0
+        self.planned_execution = decode_teccl_solution(build_result, solve_result)
+        self.planner_model_summary = dict(build_result.summary)
+        self.teccl_solver_stats = build_teccl_solver_stats(
+            experiment_name=str(runtime_state.metadata.get("experiment_name", "unknown_experiment")),
+            solver_backend="highs",
+            topology=runtime_state.topology,
+            jobs=runtime_state.active_jobs,
+            model_input=model_input,
+            build_result=build_result,
+            solve_result=solve_result,
+            model_build_time_ms=model_build_time_ms,
+            total_wall_time_ms=total_wall_time_ms,
+        ).to_dict()
+        self.last_solver_report = {
+            "planner": {
+                "status": solve_result.model_status,
+                "objective_value": solve_result.objective_value,
+                "planned_transfer_count": len(self.planned_execution.all_transfers),
+                "planned_epoch_count": len(self.planned_execution.transfers_by_epoch),
+            }
         }
 
     def _solve_job_epoch(
@@ -155,6 +269,8 @@ class TECCLScheduler(Scheduler):
         if self.strategy.solver_backend == "heuristic_solver":
             solver = HeuristicTECCLSolver(strategy=self.strategy)
             return solver.solve_epoch(job, job_state, runtime_state, current_epoch)
+        if self.strategy.solver_backend == "highs":
+            raise RuntimeError("highs backend should use the planned MILP execution path")
         raise ValueError(f"Unsupported TECCL solver_backend: {self.strategy.solver_backend}")
 
     def _build_epoch_actions(

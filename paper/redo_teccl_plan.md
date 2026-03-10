@@ -919,6 +919,103 @@ TE-CCL 结果中必须新增以下指标：
 1. 最小案例可从“求解”走到“执行完成”。
 2. 通信完成结果与求解输出一致。
 
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 4 产出 A：新增解码层与 runtime adapter
+
+本阶段已新增以下模块：
+
+1. `simulator/schedulers/teccl_solution_decoder.py`
+	- 定义 `TECCLPlannedTransfer`、`TECCLExecutionPlan`。
+	- 实现 `decode_teccl_solution()`。
+	- 已将 HiGHS 求得的正流量变量解码为按 epoch 分组的一跳传输计划，并保留 `job_id`、`commodity_id`、`chunk_id`、`flow_id`、`transfer_amount_mb`、`expected_arrival_epoch` 等回溯信息。
+
+2. `simulator/schedulers/teccl_runtime_adapter.py`
+	- 实现 `build_teccl_plan_decision()`。
+	- 已把 `TECCLExecutionPlan` 适配为运行时可直接消费的 `ScheduleDecision + epoch_actions`。
+	- 该适配层不再引入任何二次局部路由逻辑，只下发已求出的计划动作。
+
+#### 阶段 4 产出 B：调度器主路径改造结论
+
+本阶段已完成以下调度器主路径改造。
+
+1. `simulator/schedulers/teccl.py` 已新增 HiGHS 规划模式
+	- 当 `solver_backend = highs` 时，`TECCLScheduler` 不再走旧的 `solve_epoch()` 候选动作路径。
+	- 当前会在首次调度时一次性完成：
+	- `TECCLModelInput` 构建
+	- HiGHS MILP build/solve
+	- 解码成 `TECCLExecutionPlan`
+	- 缓存 solver stats 和 plan summary
+
+2. 调度输出已改为“按 epoch 回放完整计划”
+	- scheduler 当前缓存完整 `planned_execution`。
+	- 每个 epoch 只下发该 epoch 对应的一跳发送计划。
+	- 已发送过的 epoch 不会重复下发，避免运行时重复物化同一计划。
+
+3. solver stats 已贯穿到 runtime/exporter
+	- `scheduler.export_debug_state()` 当前已包含：
+	- `teccl_solver_stats`
+	- `teccl_plan_summary`
+	- `planner_model_summary`
+	- 这使阶段 3 的统计框架能够直接复用于阶段 4 的标准运行链路。
+
+#### 阶段 4 产出 C：运行时对接改造结论
+
+本阶段已完成以下 runtime 对接改造。
+
+1. `simulator/core/engine.py` 已支持 planned MILP epoch_action 物化
+	- `_materialize_epoch_action()` 当前优先读取 `action.metadata.flow_id`、`owner_job_id`、`transfer_amount_mb`。
+	- 因此运行时已不再假设每个 TE-CCL hop 必须发送完整 chunk，也不再强依赖旧 replica-state flow id 规则。
+
+2. TE-CCL 作业完成判定已从旧 job_states 切到 planned flow 集合
+	- `_update_completed_jobs_from_decision()` 当前在 `execution_mode = planned_milp` 时，会把 `flow_ids_by_job` 写入 runtime metadata。
+	- `_mark_completed_jobs()` 当前会依据“某 job 的所有 planned flow 都已完成”来标记 TE-CCL 作业完成。
+
+3. 执行阶段不再改写求解结果
+	- runtime 当前只负责把解码后的 epoch_action 物化成 flow 并按链路带宽/时延推进。
+	- 不再对 TE-CCL 计划做额外 hop 选择、目的地改写或局部重路由。
+
+#### 阶段 4 已验证结果
+
+本阶段已完成两层验证。
+
+1. 最小端到端执行验证
+	- 使用 `inter_dc_dual_fabric_topology` 和单作业 `stage4_minimal_unicast`。
+	- participants：`gpu_0 -> gpu_8`
+	- scheduler backend：`highs`
+	- `planning_horizon_epochs = 40`
+	- 运行结果：
+	- `completed_job_ids = ['stage4_minimal_unicast']`
+	- `completed_flow_count = 50`
+	- `plan_flow_counts = {'stage4_minimal_unicast': 50}`
+	- `solver_status = Optimal`
+	- `planned_transfer_count = 50`
+	- `emitted_epoch_count = 22`
+	- `schedule_history_len = 22`
+	- 最终运行时间：`now_ms = 21.96`
+
+2. 标准 exporter 链路验证
+	- 已生成标准结果目录：`results/stage4_minimal_highs_export`
+	- 已成功写出：
+	- `summary.json`
+	- `scheduler_debug.json`
+	- `teccl_solver_stats.json`
+	- `schedule_history.json`
+	- `flow_trace.csv`
+	- 说明 highs 规划模式已经能够进入现有统一结果导出体系。
+
+#### 阶段 4 结论
+
+阶段 4 已完成，并得到以下明确结论：
+
+1. HiGHS MILP 解已经可以被正式解码为可执行 epoch 计划，并由当前 runtime 执行到完成。
+2. 运行时对接已经从旧 TE-CCL 状态机完成判定切换为 planned flow 集合驱动，能够支持 planner 模式下的作业完成判断。
+3. 后续阶段 5 可以直接围绕“容量约束、复制语义、buffer 更新、最终需求满足”的小规模手工案例做正确性验证，而不需要再补执行适配层。
+
 ### 阶段 5：正确性验证
 
 目标：验证新实现确实符合建模说明。

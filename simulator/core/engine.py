@@ -132,7 +132,7 @@ class RuntimeEngine:
     def _materialize_epoch_action(self, runtime: RuntimeState, action: EpochAction) -> None:
         replica_id = str(action.metadata.get("replica_id", ""))
         ultimate_destination = str(action.metadata.get("ultimate_destination", action.next_node))
-        flow_id = (
+        flow_id = str(action.metadata.get("flow_id", "")) or (
             f"epoch::{action.epoch_index}::{action.chunk_id}::{replica_id}::{action.current_node}->{action.next_node}"
             f"::{ultimate_destination}::{action.source_gpu}"
         )
@@ -141,8 +141,8 @@ class RuntimeEngine:
         path = self._resolve_route_fragment(runtime, action.current_node, action.next_node, action.route_fragment)
         if not path:
             return
-        owner_job_id = action.chunk_id.split("_chunk_")[0]
-        chunk_size_mb = self._lookup_chunk_size(runtime, owner_job_id, action.chunk_id)
+        owner_job_id = str(action.metadata.get("owner_job_id", "")) or action.chunk_id.split("_chunk_")[0]
+        chunk_size_mb = float(action.metadata.get("transfer_amount_mb", 0.0) or 0.0) or self._lookup_chunk_size(runtime, owner_job_id, action.chunk_id)
         runtime.flow_states[flow_id] = FlowState(
             flow_id=flow_id,
             owner_job_id=owner_job_id,
@@ -317,6 +317,16 @@ class RuntimeEngine:
 
     def _mark_completed_jobs(self, runtime: RuntimeState) -> None:
         if runtime.metadata.get("scheduler_type") == "teccl":
+            planned_flow_ids_by_job = runtime.metadata.get("teccl_planned_flow_ids_by_job") or {}
+            completed_flow_ids = set(runtime.completed_flow_ids)
+            for job in runtime.active_jobs:
+                if job.job_id in runtime.completed_job_ids:
+                    continue
+                planned_flow_ids = list(planned_flow_ids_by_job.get(job.job_id) or [])
+                if not planned_flow_ids:
+                    continue
+                if all(flow_id in completed_flow_ids for flow_id in planned_flow_ids):
+                    runtime.completed_job_ids.append(job.job_id)
             return
         for job in runtime.active_jobs:
             if job.job_id in runtime.completed_job_ids:
@@ -368,6 +378,11 @@ class RuntimeEngine:
 
     def _update_completed_jobs_from_decision(self, runtime: RuntimeState, decision: ScheduleDecision) -> None:
         if decision.metadata.get("scheduler") != "teccl":
+            return
+        if decision.metadata.get("execution_mode") == "planned_milp":
+            plan_summary = decision.metadata.get("teccl_plan_summary") or {}
+            runtime.metadata["teccl_planned_flow_ids_by_job"] = dict(plan_summary.get("flow_ids_by_job") or {})
+            self._mark_completed_jobs(runtime)
             return
         job_states = decision.metadata.get("job_states", {})
         for job_id, job_state in job_states.items():
