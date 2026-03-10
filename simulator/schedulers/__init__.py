@@ -18,6 +18,9 @@ from simulator.schedulers.teccl_milp_builder import TECCLMILPBuildError
 from simulator.schedulers.teccl_milp_builder import TECCLMILPBuildResult
 from simulator.schedulers.teccl_milp_builder import TECCLVariableBundle
 from simulator.schedulers.teccl_milp_builder import build_teccl_milp_model
+from simulator.schedulers.teccl_metrics import TECCLSolverStats
+from simulator.schedulers.teccl_metrics import build_teccl_solver_stats
+from simulator.schedulers.teccl_metrics import export_teccl_solver_artifacts
 from simulator.schedulers.teccl_model_input import TECCLDemandEntry
 from simulator.schedulers.teccl_model_input import TECCLInitialBufferEntry
 from simulator.schedulers.teccl_model_input import TECCLModelInput
@@ -38,14 +41,17 @@ __all__ = [
 	"TECCLMILPBuildResult",
 	"TECCLModelInput",
 	"TECCLNodePartition",
+	"TECCLSolverStats",
 	"TECCLVariableBundle",
 	"build_commodity_index",
 	"build_directed_edge_index",
 	"build_epoch_index",
 	"build_node_partition",
+	"build_teccl_solver_stats",
 	"build_teccl_milp_model",
 	"build_teccl_index_bundle",
 	"build_teccl_model_input",
+	"export_teccl_solver_artifacts",
 	"infer_planning_horizon_epochs",
 	"solve_teccl_milp",
 ]

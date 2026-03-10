@@ -783,6 +783,126 @@ TE-CCL 结果中必须新增以下指标：
 1. 单次求解后能生成完整的 solver stats。
 2. summary.json 和独立 stats json 中都能看到核心字段。
 
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 3 产出 A：新增统计与导出模块
+
+本阶段已新增以下模块：
+
+1. `simulator/schedulers/teccl_metrics.py`
+	- 定义 `TECCLSolverStats`。
+	- 实现 `build_teccl_solver_stats()`。
+	- 实现 `export_teccl_solver_artifacts()`。
+	- 已覆盖求解时间、负载规模、模型规模、求解状态和独立 JSON 导出。
+
+2. `simulator/experiment/teccl_planning.py`
+	- 定义 `TECCLPlanningRunResult`。
+	- 实现 `run_teccl_planning_export()`。
+	- 已支持从 experiment 配置直接完成 topology/workload 读取、planning horizon 推导、MILP build、HiGHS solve 和 stats 导出。
+
+3. `scripts/export_teccl_solver_stats.py`
+	- 提供单次 TE-CCL 求解统计导出入口。
+	- 可直接输出 `summary.json`、`scheduler_debug.json` 和 `teccl_solver_stats.json`。
+
+#### 阶段 3 产出 B：已落地的统计字段
+
+本阶段已正式落地以下统计字段。
+
+1. 求解时间字段
+	- `teccl_model_build_time_ms`
+	- `teccl_solve_only_time_ms`
+	- `teccl_solver_wall_time_ms`
+
+2. 负载规模字段
+	- `job_count`
+	- `demand_count`
+	- `chunk_count`
+	- `commodity_count`
+	- `source_gpu_count`
+	- `destination_pair_count`
+	- `epoch_count`
+	- `node_count`
+	- `edge_count`
+	- `total_demand_mb`
+	- `average_chunk_mb`
+	- `max_chunk_mb`
+	- `inter_dc_edge_count`
+	- `planning_horizon_epochs`
+	- `planning_horizon_ms`
+
+3. 模型规模字段
+	- `variable_count`
+	- `binary_variable_count`
+	- `integer_variable_count`
+	- `continuous_variable_count`
+	- `constraint_count`
+	- `non_zero_count`
+
+4. 求解结果字段
+	- `solver_status`
+	- `objective_value`
+	- `best_bound`
+	- `mip_gap`
+	- `node_explored_count`
+
+#### 阶段 3 产出 C：导出链路落地结论
+
+本阶段已明确以下导出链路结论。
+
+1. 独立导出入口已经具备
+	- `export_teccl_solver_artifacts()` 当前会直接写出：
+	- `summary.json`
+	- `scheduler_debug.json`
+	- `teccl_solver_stats.json`
+
+2. summary.json 已包含核心 solver 字段
+	- `summary.json.aggregate_metrics` 和首个 repetition 都会包含阶段 3 的核心数值字段。
+	- 因此后续外部分析脚本不必额外读取内部对象，即可看见 build time、solve time、模型规模和求解状态。
+
+3. 通用 exporter 已具备兼容能力
+	- `simulator/metrics/exporters.py` 当前已经支持从 `scheduler_debug_state.teccl_solver_stats` 读取统计并补入 summary。
+	- 当阶段 4/6 接回统一运行入口后，可继续复用该导出逻辑生成 `teccl_solver_stats.json`。
+
+#### 阶段 3 已验证结果
+
+已使用双 DC 显式拓扑和最小单播作业完成单次导出验证，结果如下：
+
+1. 验证输出目录：`results/stage3_minimal_solver_stats`
+2. 已成功写出：
+	- `summary.json`
+	- `scheduler_debug.json`
+	- `teccl_solver_stats.json`
+3. 验证作业：`stage3_minimal_unicast`
+4. participants：`gpu_0 -> gpu_8`
+5. `teccl_model_build_time_ms = 391.2387230002423`
+6. `teccl_solve_only_time_ms = 77.03954799944768`
+7. `teccl_solver_wall_time_ms = 468.3666720002293`
+8. `job_count = 1`
+9. `chunk_count = 1`
+10. `commodity_count = 1`
+11. `destination_pair_count = 1`
+12. `inter_dc_edge_count = 2`
+13. `variable_count = 9480`
+14. `constraint_count = 11880`
+15. `non_zero_count = 24779`
+16. `solver_status = Optimal`
+17. `objective_value = 13.583775798823641`
+18. `best_bound = 13.583775798823641`
+19. `mip_gap = 0.0`
+20. `node_explored_count = 1`
+
+#### 阶段 3 结论
+
+阶段 3 已完成，并得到以下明确结论：
+
+1. TE-CCL 的 build time、solve time、wall time、负载规模和模型规模已经可以在单次求解后独立导出。
+2. `summary.json` 与 `teccl_solver_stats.json` 两条导出链路已经同时具备核心字段，满足阶段验收要求。
+3. 后续阶段 4 可以直接围绕 `TECCLPlanningRunResult`、`TECCLSolverStats` 和现有 exporter 兼容层继续接 runtime，不需要回头补统计框架。
+
 ### 阶段 4：求解结果解码与 runtime 对接
 
 目标：让 MILP 解能被当前仿真底座执行。

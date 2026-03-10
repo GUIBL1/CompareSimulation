@@ -90,6 +90,7 @@ def build_teccl_milp_model(
 		"flow_variable_count": flow_count,
 		"buffer_variable_count": buffer_count,
 		"receive_variable_count": receive_count,
+		"binary_variable_count": 0,
 		"integer_variable_count": flow_count + buffer_count + receive_count if config.enforce_integrality else 0,
 		"continuous_variable_count": 0 if config.enforce_integrality else flow_count + buffer_count + receive_count,
 		**constraint_counters,

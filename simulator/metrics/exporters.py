@@ -51,6 +51,7 @@ def export_experiment_results(
         "aggregate_metrics": aggregate_summary,
         "repetitions": per_run_summaries,
     }
+    teccl_solver_stats_payload = _build_teccl_solver_stats_payload(experiment, run_records)
 
     exported_files: dict[str, str] = {}
     if experiment.metrics.export_json:
@@ -63,6 +64,10 @@ def export_experiment_results(
         exported_files["summary_json"] = str(summary_path)
         exported_files["scheduler_debug_json"] = str(scheduler_debug_path)
         exported_files["link_load_trace_json"] = str(link_trace_path)
+        if teccl_solver_stats_payload is not None:
+            teccl_solver_stats_path = output_dir / "teccl_solver_stats.json"
+            teccl_solver_stats_path.write_text(json.dumps(teccl_solver_stats_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            exported_files["teccl_solver_stats_json"] = str(teccl_solver_stats_path)
 
     if experiment.metrics.export_csv:
         summary_csv_path = output_dir / "summary.csv"
@@ -150,13 +155,65 @@ def _build_teccl_metrics(
     job_states = scheduler_debug_state.get("job_states") or {}
     replica_count = sum(len(job_state.get("chunk_replicas") or {}) for job_state in job_states.values())
     completed_replica_count = sum(len(job_state.get("completed_replica_ids") or []) for job_state in job_states.values())
-    return {
+    metrics = {
         "teccl_solver_backend": strategy.get("solver_backend", "unknown"),
         "teccl_epoch_size_ms": strategy.get("epoch_size_ms", 0.0),
         "teccl_solver_report_count": len(scheduler_debug_state.get("solver_reports") or {}),
         "teccl_total_epoch_action_count": sum(int(item.get("epoch_action_count", 0)) for item in schedule_history),
         "teccl_replica_count": replica_count,
         "teccl_completed_replica_count": completed_replica_count,
+    }
+    solver_stats = scheduler_debug_state.get("teccl_solver_stats") or {}
+    for key, value in solver_stats.items():
+        if isinstance(value, int | float | str | bool):
+            metrics[key] = value
+    return metrics
+
+
+def _build_teccl_solver_stats_payload(
+    experiment: ExperimentConfig,
+    run_records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if experiment.scheduler.type != "teccl":
+        return None
+    repetition_stats = []
+    for record in run_records:
+        scheduler_debug_state = record.get("scheduler_debug_state") or {}
+        solver_stats = scheduler_debug_state.get("teccl_solver_stats")
+        if not solver_stats:
+            continue
+        repetition_stats.append(
+            {
+                "repetition_index": record["repetition_index"],
+                **solver_stats,
+            }
+        )
+    if not repetition_stats:
+        return None
+
+    aggregate_metrics: dict[str, Any] = {
+        "experiment_name": experiment.meta.name,
+        "scheduler_type": experiment.scheduler.type,
+        "repetition_count": len(repetition_stats),
+    }
+    numeric_keys = {
+        key
+        for item in repetition_stats
+        for key, value in item.items()
+        if isinstance(value, int | float) and key != "repetition_index"
+    }
+    for key in sorted(numeric_keys):
+        values = [float(item[key]) for item in repetition_stats if isinstance(item.get(key), int | float)]
+        if not values:
+            continue
+        aggregate_metrics[f"avg_{key}"] = mean(values)
+        aggregate_metrics[f"max_{key}"] = max(values)
+        aggregate_metrics[f"min_{key}"] = min(values)
+    return {
+        "experiment_name": experiment.meta.name,
+        "scheduler_type": experiment.scheduler.type,
+        "aggregate_metrics": aggregate_metrics,
+        "repetitions": repetition_stats,
     }
 
 
