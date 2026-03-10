@@ -141,6 +141,9 @@ def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]
     priority_scores = list((scheduler_debug_state.get("last_priority_scores") or {}).values())
     priority_assignments = scheduler_debug_state.get("last_priority_assignments") or {}
     crux_model_summary = scheduler_debug_state.get("crux_model_summary") or {}
+    compression = scheduler_debug_state.get("crux_priority_compression") or {}
+    contention_dag = scheduler_debug_state.get("crux_contention_dag") or {}
+    dag_metadata = contention_dag.get("metadata") or {}
     return {
         "crux_avg_observed_comm_time_ms": mean(observed_comm_times) if observed_comm_times else 0.0,
         "crux_avg_intensity_score": mean(intensity_scores) if intensity_scores else 0.0,
@@ -150,12 +153,18 @@ def _build_crux_metrics(scheduler_debug_state: dict[str, Any]) -> dict[str, Any]
         "crux_scheduler_wall_time_ms": float(scheduler_debug_state.get("crux_scheduler_wall_time_ms", 0.0) or 0.0),
         "crux_path_selection_time_ms": float(scheduler_debug_state.get("crux_path_selection_time_ms", 0.0) or 0.0),
         "crux_priority_assignment_time_ms": float(scheduler_debug_state.get("crux_priority_assignment_time_ms", 0.0) or 0.0),
+        "crux_priority_compression_time_ms": float(scheduler_debug_state.get("crux_priority_compression_time_ms", 0.0) or 0.0),
         "crux_model_job_count": int(crux_model_summary.get("job_count", 0) or 0),
         "crux_model_flow_count": int(crux_model_summary.get("flow_count", 0) or 0),
         "crux_model_path_candidate_count": int(crux_model_summary.get("path_candidate_count", 0) or 0),
         "crux_model_selected_path_count": int(crux_model_summary.get("selected_path_count", 0) or 0),
         "crux_hardware_priority_count": int(crux_model_summary.get("hardware_priority_count", 0) or 0),
         "crux_average_priority_score": float(crux_model_summary.get("average_priority_score", 0.0) or 0.0),
+        "crux_contention_dag_node_count": int(dag_metadata.get("node_count", 0) or 0),
+        "crux_contention_dag_edge_count": int(dag_metadata.get("edge_count", 0) or 0),
+        "crux_total_cut_weight": float(compression.get("total_cut_weight", 0.0) or 0.0),
+        "crux_lost_cut_weight": float(compression.get("lost_cut_weight", 0.0) or 0.0),
+        "crux_topological_order_sample_count": int(compression.get("topological_order_sample_count", 0) or 0),
     }
 
 

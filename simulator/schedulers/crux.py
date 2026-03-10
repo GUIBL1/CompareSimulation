@@ -11,6 +11,10 @@ from simulator.schedulers.base import ScheduleDecision
 from simulator.schedulers.base import Scheduler
 from simulator.schedulers.crux_model_input import CruxModelInput
 from simulator.schedulers.crux_model_input import build_crux_model_input
+from simulator.schedulers.crux_priority_compression import CruxContentionDag
+from simulator.schedulers.crux_priority_compression import CruxPriorityCompressionResult
+from simulator.schedulers.crux_priority_compression import build_contention_dag
+from simulator.schedulers.crux_priority_compression import compress_contention_dag
 from simulator.workload.models import UnifiedJob
 
 
@@ -19,6 +23,7 @@ class CruxScheduler(Scheduler):
     max_priority_levels: int = 8
     hardware_priority_count: int | None = None
     candidate_path_limit: int = 8
+    topological_order_sample_count: int = 8
     intensity_window_iterations: int = 3
     intensity_definition_mode: str = "selected_path_max_flow_time"
     priority_factor_mode: str = "dlt_aware"
@@ -31,6 +36,9 @@ class CruxScheduler(Scheduler):
     last_scheduler_wall_time_ms: float = 0.0
     last_path_selection_time_ms: float = 0.0
     last_priority_assignment_time_ms: float = 0.0
+    last_priority_compression_time_ms: float = 0.0
+    last_contention_dag: dict[str, object] = field(default_factory=dict)
+    last_priority_compression_result: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.hardware_priority_count is not None:
@@ -88,11 +96,19 @@ class CruxScheduler(Scheduler):
             valid_until_ms=runtime_state.now_ms,
             metadata={
                 "scheduler": "crux",
-                "execution_mode": "stage2_intensity_path_and_priority_assignment",
+                "execution_mode": "stage3_contention_dag_and_priority_compression",
                 "intensity_scores": {},
                 "priority_scores": {},
             },
         )
+        compression_started_at = perf_counter()
+        contention_dag = build_contention_dag(model_input)
+        compression_result = compress_contention_dag(
+            dag=contention_dag,
+            hardware_priority_count=max(1, int(self.hardware_priority_count or self.max_priority_levels)),
+            topological_order_sample_count=self.topological_order_sample_count,
+        )
+        self.last_priority_compression_time_ms = (perf_counter() - compression_started_at) * 1000.0
         job_count = max(1, len(ranked_job_inputs))
         for job_input in ranked_job_inputs:
             job = next((candidate for candidate in runtime_state.active_jobs if candidate.job_id == job_input.job_id), None)
@@ -101,7 +117,7 @@ class CruxScheduler(Scheduler):
             intensity = job_input.intensity.intensity_value if job_input.intensity is not None else self._intensity_score(job, model_input)
             priority_score = job_input.priority.priority_score_pj if job_input.priority is not None else intensity
             rank_index = job_input.priority.raw_priority_rank if job_input.priority is not None else 0
-            priority = self._compress_priority(rank_index, job_count)
+            priority = compression_result.hardware_priority_by_job_id.get(job.job_id, self._compress_priority(rank_index, job_count))
             decision.priority_assignments[job.job_id] = priority
             decision.metadata["intensity_scores"][job.job_id] = intensity
             decision.metadata["priority_scores"][job.job_id] = priority_score
@@ -113,6 +129,8 @@ class CruxScheduler(Scheduler):
         self.last_intensity_scores = dict(decision.metadata["intensity_scores"])
         self.last_priority_scores = dict(decision.metadata["priority_scores"])
         self.last_model_input = model_input.to_debug_dict()
+        self.last_contention_dag = contention_dag.to_debug_dict()
+        self.last_priority_compression_result = compression_result.to_debug_dict()
         self.last_scheduler_wall_time_ms = (perf_counter() - started_at) * 1000.0
         return decision
 
@@ -126,9 +144,12 @@ class CruxScheduler(Scheduler):
             "crux_scheduler_wall_time_ms": self.last_scheduler_wall_time_ms,
             "crux_path_selection_time_ms": self.last_path_selection_time_ms,
             "crux_priority_assignment_time_ms": self.last_priority_assignment_time_ms,
+            "crux_priority_compression_time_ms": self.last_priority_compression_time_ms,
             "stage0_baseline": self._stage0_baseline_inventory(),
             "crux_model_input": dict(self.last_model_input),
             "crux_model_summary": dict(self.last_model_input.get("summary", {})) if self.last_model_input else {},
+            "crux_contention_dag": dict(self.last_contention_dag),
+            "crux_priority_compression": dict(self.last_priority_compression_result),
         }
 
     def _build_model_input(self, runtime_state: RuntimeState) -> CruxModelInput:
@@ -427,5 +448,6 @@ class CruxScheduler(Scheduler):
                 "scheduler_debug now exports crux_model_input and crux_model_summary for later stage validation",
                 "CruxScheduler accepts hardware_priority_count as a forward-compatible alias of max_priority_levels",
                 "stage 2 switches CRUX path selection to intensity-ordered candidate evaluation and final priority assignment to P_j = k_j I_j",
+                "stage 3 replaces simple rank bucket compression with contention DAG + topological-order sampling + contiguous DP compression",
             ],
         }

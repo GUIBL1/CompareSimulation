@@ -478,6 +478,14 @@ CRUX 结果中必须新增以下指标：
 
 ### 阶段 3：争用 DAG 与优先级压缩落地
 
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. 新增 `simulator/schedulers/crux_priority_compression.py`，实现了 contention DAG 构建、边权计算、多拓扑序采样与连续分段 DP。
+2. CRUX 调度器已改为基于已选路径构建 DAG，并用 DAG 压缩结果生成硬件优先级，不再默认使用简单 rank bucket 作为正式逻辑。
+3. scheduler_debug 与 summary 已补充 DAG 节点数、边数、cut weight、lost cut weight、拓扑序样本数和最终硬件优先级映射等阶段 3 结果。
+
 目标：完成 DAG 构建、多拓扑序采样和动态规划压缩。
 
 工作内容：
