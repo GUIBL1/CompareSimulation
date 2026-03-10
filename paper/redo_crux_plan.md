@@ -552,6 +552,14 @@ CRUX 结果中必须新增以下指标：
 
 ### 阶段 6：正确性验证
 
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. 已通过 3 个手工可解释小案例验证 CRUX 当前实现：高 intensity 作业优先占据低拥塞路径、contention DAG 边方向与压缩后硬件优先级满足顺序约束、priority-aware runtime 下高优先级流先于低优先级流完成。
+2. 阶段 6 验证直接通过内存代码片段执行，没有保留额外验证脚本或临时文件；符合“验证通过后删除临时文件”的执行要求。
+3. 已验证的关键数值包括：最小拥塞 runtime 案例下高优先级流 12.8ms 完成、低优先级流 25.6ms 完成；3 作业共享链路案例导出的 DAG 边为 `job_a -> job_b`、`job_a -> job_c`、`job_b -> job_c`。
+
 目标：验证新实现确实符合 CRUX 建模说明。
 
 工作内容：
@@ -567,6 +575,16 @@ CRUX 结果中必须新增以下指标：
 2. 可导出可解释的 DAG/priority 调试信息。
 
 ### 阶段 7：实验回归与文档同步
+
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. 已新增最小 CRUX 端到端回归入口：`configs/topology/minimal_e2e_topology.yaml`、`configs/workload/minimal_e2e_workload.yaml`、`configs/experiment/minimal_crux_e2e.yaml`。
+2. 已完成三档 CRUX 回归：`results/minimal_crux_e2e`、`results/inter_dc_mild_crux`、`results/inter_dc_parallel_triple_heavy_crux`，三者均成功导出 `summary.json`、`flow_trace.csv`、`scheduler_debug.json` 与 `crux_scheduler_stats.json`。
+3. 已验证 CRUX 构建时间与执行时间拆分：minimal 结果为 0.20ms 构建 + 3.84ms 通信，dual mild 为 1.06ms 构建 + 2.88ms 通信，triple heavy 为 18.37ms 构建 + 1877.33ms 通信。
+4. 已同步 compare/export/visualization 口径：`simulator/metrics/visualization.py` 现会把 CRUX 也画成“规划构建时间 + 通信执行时间”的堆叠完成时间图；`results/stage7_inter_dc_mild_crux_vs_teccl/comparison/comparison_summary.json` 已验证 mild 场景下 CRUX 与 TE-CCL 两侧都按该口径展示。
+5. 已同步文档：`README.md`、`explan.md`、`configs/experiment/README.md` 已更新到 paper-faithful CRUX 与 stage-5/export 口径。
 
 目标：把新实现接回现有实验入口，并同步 README / explan / 配置说明。
 

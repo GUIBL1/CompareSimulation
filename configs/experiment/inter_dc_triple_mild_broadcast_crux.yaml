@@ -10,9 +10,13 @@ inputs:
 scheduler:
   type: crux
   crux:
-    max_priority_levels: 8
+    hardware_priority_count: 8
     candidate_path_limit: 24
     intensity_window_iterations: 3
+    topological_order_sample_count: 8
+    intensity_definition_mode: selected_path_max_flow_time
+    priority_factor_mode: dlt_aware
+    enable_priority_aware_bandwidth: true
   teccl:
     epoch_size_ms: 1.0
     solver_backend: exact_milp_solver

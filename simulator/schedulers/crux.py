@@ -27,6 +27,7 @@ class CruxScheduler(Scheduler):
     intensity_window_iterations: int = 3
     intensity_definition_mode: str = "selected_path_max_flow_time"
     priority_factor_mode: str = "dlt_aware"
+    enable_priority_aware_bandwidth: bool = True
     observed_comm_time_ms: dict[str, float] = field(default_factory=dict)
     last_path_assignments: dict[str, list[str]] = field(default_factory=dict)
     last_priority_assignments: dict[str, int] = field(default_factory=dict)

@@ -555,17 +555,28 @@ def _compute_comparison_metrics(
     total_jobs = int(repetition_summary.get("total_job_count", 0) or 0)
     completed_jobs = int(repetition_summary.get("completed_job_count", 0) or 0)
     runtime_completion_time_ms = float(repetition_summary.get("completion_time_ms", 0.0) or 0.0)
-    planning_time_ms = float(repetition_summary.get("teccl_solver_wall_time_ms", 0.0) or 0.0) if scheduler_type == "teccl" else 0.0
-    communication_execution_time_ms = float(
-        repetition_summary.get("teccl_communication_execution_time_ms", runtime_completion_time_ms) or runtime_completion_time_ms
-    )
-    end_to_end_time_ms = float(
-        repetition_summary.get(
-            "teccl_end_to_end_time_ms",
-            planning_time_ms + communication_execution_time_ms if scheduler_type == "teccl" else runtime_completion_time_ms,
+    if scheduler_type == "teccl":
+        planning_time_ms = float(repetition_summary.get("teccl_solver_wall_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("teccl_communication_execution_time_ms", runtime_completion_time_ms) or runtime_completion_time_ms
         )
-        or (planning_time_ms + communication_execution_time_ms if scheduler_type == "teccl" else runtime_completion_time_ms)
-    )
+        end_to_end_time_ms = float(
+            repetition_summary.get("teccl_end_to_end_time_ms", planning_time_ms + communication_execution_time_ms)
+            or (planning_time_ms + communication_execution_time_ms)
+        )
+    elif scheduler_type == "crux":
+        planning_time_ms = float(repetition_summary.get("crux_scheduler_wall_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("crux_communication_execution_time_ms", runtime_completion_time_ms) or runtime_completion_time_ms
+        )
+        end_to_end_time_ms = float(
+            repetition_summary.get("crux_end_to_end_time_ms", planning_time_ms + communication_execution_time_ms)
+            or (planning_time_ms + communication_execution_time_ms)
+        )
+    else:
+        planning_time_ms = 0.0
+        communication_execution_time_ms = runtime_completion_time_ms
+        end_to_end_time_ms = runtime_completion_time_ms
 
     bottleneck = _build_bottleneck_metrics(trace_rows)
     logical_flow_durations = _extract_logical_transfer_durations(flow_rows)

@@ -98,41 +98,50 @@ $$
 
 ### 3.1 当前 CRUX 的建模粒度
 
-当前 CRUX 是 job-level 调度器，但会把统一工作负载中的 source-destination 需求物化成端到端 flow。
+当前 CRUX 仍然是 job-level 调度器，但它已经不再是早期的“强度排序 + 等宽分桶”近似版，而是按 paper/crux.md 重构后的主路径实现。
 
-它保留了三个核心思想：
+它当前的核心对象是：
 
-1. 用 compute/communication 比例近似 job intensity。
-2. 根据 intensity 对 job 做排序和优先级压缩。
-3. 在候选路径中选择相对低拥塞路径。
+1. 以 UnifiedJob.compute_phase_ms 映射 $W_j$。
+2. 以已选路径上的最大传输时间映射 $t_j$。
+3. 计算 $I_j = W_j / t_j$。
+4. 计算 $P_j = k_j I_j$。
+5. 基于共享链路关系构建 contention DAG。
+6. 通过多拓扑序采样 + 连续分段 DP 进行硬件优先级压缩。
 
 ### 3.2 当前 CRUX 的主要实现步骤
 
 每次调度时，CRUX 做的是：
 
-1. 更新历史观测通信时间 `observed_comm_time_ms`。
-2. 计算每个 job 的 intensity score。
-3. 按 score 排序。
-4. 把排序结果压缩到有限个 priority level。
-5. 为每个 flow 选择一条最优候选路径。
+1. 构造 CRUX 输入模型，显式导出 job、flow、path、intensity 和 priority 对象。
+2. 按初始 intensity 顺序做 path selection，让高 intensity 作业优先占据低拥塞路径。
+3. 基于最终选中路径重新计算 $t_j$、$I_j$ 和 $P_j$。
+4. 用最终优先级与共享链路关系构建 contention DAG。
+5. 在给定 hardware priority 数下执行拓扑序采样和 DP 压缩。
+6. 将压缩后的硬件优先级交给 runtime，使高优先级流先消费链路残余带宽。
 
-路径选择的代价主要由三部分组成：
+当前导出也会把这条主路径拆开统计：
 
-1. 路径上最大链路利用率。
-2. 路径总 contention。
-3. 路径长度。
+1. path selection time
+2. priority assignment time
+3. priority compression time
+4. communication execution time
+5. end-to-end time
 
-也就是说，当前 CRUX 更像一个“作业级路径与优先级联合启发式”，而不是论文里所有机制的完整复刻。
+### 3.3 当前 CRUX 与 TE-CCL 的边界差异
 
-### 3.3 当前 CRUX 没做什么
+当前实现中，CRUX 与 TE-CCL 的差异不再是“一个完整、一个基线”，而是两种不同建模粒度：
 
-当前实现没有做以下事情：
+1. CRUX 是 job/path/priority 主导的作业级调度。
+2. TE-CCL 是 chunk/epoch/MILP 主导的时间展开调度。
 
-1. 没有实现更复杂的全局最优化路径分配。
-2. 没有把 GPU buffer 或 chunk replica 语义纳入调度状态。
-3. 没有做 TE-CCL 那种逐 epoch 的时间展开计划。
+CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 
-因此，当前 CRUX 的定位是稳定、易解释的 job/path baseline。
+1. GPU replica 持久化状态。
+2. 交换机零缓冲非复制约束的显式 MILP 变量。
+3. 逐 epoch 的全局离线计划求解。
+
+因此，当前系统比较的是两类不同调度思想在同一 runtime 底座上的表现，而不是两份同构算法实现。
 
 ## 4. TE-CCL 实现了什么
 

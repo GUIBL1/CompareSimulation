@@ -2,7 +2,7 @@
 
 本目录的实验配置用于运行单个仿真实验。它把 topology、workload、scheduler、simulation 和 metrics 串起来，是 `ExperimentRunner` 的直接输入。
 
-可参考模板：`experiment.template.yaml`，可参考示例：`minimal_crux_e2e.yaml`、`minimal_teccl_e2e.yaml`。`generated/` 目录下的 YAML 也是同一种 schema，只是由批处理入口自动生成。
+可参考模板：`experiment.template.yaml`，可参考示例：`inter_dc_dual_mild_broadcast_crux.yaml`、`inter_dc_dual_mild_broadcast_teccl.yaml`。
 
 ## 基本结构
 
@@ -75,9 +75,14 @@ metrics:
 
 #### CRUX 参数
 
-- `max_priority_levels`：必填。优先级压缩级数。
+- `max_priority_levels`：兼容字段。若未显式给出 `hardware_priority_count`，则作为硬件优先级数使用。
+- `hardware_priority_count`：推荐显式填写。DAG 压缩后的硬件优先级级数。
 - `candidate_path_limit`：候选路径上限。
+- `topological_order_sample_count`：优先级压缩时采样的拓扑序数量。
 - `intensity_window_iterations`：强度统计窗口。
+- `intensity_definition_mode`：当前推荐 `selected_path_max_flow_time`。
+- `priority_factor_mode`：当前推荐 `dlt_aware`。
+- `enable_priority_aware_bandwidth`：是否在 runtime 中启用高优先级先占用残余带宽。
 
 #### TECCL 参数
 
@@ -116,9 +121,13 @@ metrics:
 scheduler:
   type: crux
   crux:
-    max_priority_levels: 4
-    candidate_path_limit: 2
-    intensity_window_iterations: 1
+    hardware_priority_count: 4
+    candidate_path_limit: 4
+    topological_order_sample_count: 4
+    intensity_window_iterations: 3
+    intensity_definition_mode: selected_path_max_flow_time
+    priority_factor_mode: dlt_aware
+    enable_priority_aware_bandwidth: true
 ```
 
 ## TECCL 示例
@@ -150,6 +159,7 @@ scheduler:
 - 公平对比时，CRUX 与 TECCL 两个 experiment 只应在 `scheduler` 参数上不同。
 - `metrics.output_dir` 不要复用同一目录，避免结果相互覆盖。
 - 当前正式实验建议直接使用 `solver_backend: highs`，并显式控制 `planning_horizon_epochs` 与 `max_solver_time_ms`。
+- 当前正式 CRUX 实验建议显式填写 `hardware_priority_count`、`topological_order_sample_count`、`intensity_definition_mode`、`priority_factor_mode` 与 `enable_priority_aware_bandwidth`，不要只依赖旧版默认值。
 - 如果 TE-CCL 运行时间过长，优先检查 `planning_horizon_epochs`、chunk 数、目的地对数量、拓扑边数和 `mip_gap` 设置，而不是先怀疑 runtime 通信执行。
 - 如果只想跑 1 次最小复现，把 `repetitions` 设为 `1`，并把 `max_time_ms` 控制在较小范围。
 
@@ -157,6 +167,7 @@ scheduler:
 
 - `scheduler.type=teccl` 但漏写 `scheduler.teccl.epoch_size_ms` 或 `solver_backend`。
 - `scheduler.type=teccl` 但没有显式限制 `planning_horizon_epochs`，导致时间展开 MILP 模型规模过大。
-- `scheduler.type=crux` 但漏写 `scheduler.crux.max_priority_levels`。
+- `scheduler.type=crux` 但同时漏写 `scheduler.crux.max_priority_levels` 和 `scheduler.crux.hardware_priority_count`。
+- `scheduler.type=crux` 但没有开启 `enable_priority_aware_bandwidth`，导致 priority 数值导出存在而运行时行为仍接近纯公平共享。
 - `output_dir` 为空。
 - `topology_file`、`workload_file` 路径写错。

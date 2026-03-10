@@ -13,12 +13,13 @@
 - 支持 generated 和 explicit 两种拓扑构建方式
 - 支持统一工作负载模型，供 CRUX 和 TE-CCL 共用
 - 支持最小离散事件执行器、链路共享和结果导出
-- 支持 CRUX 基线调度
+- 支持按 paper/crux.md 重构后的 CRUX：GPU intensity、priority assignment、争用 DAG、优先级压缩与 priority-aware runtime
 - 支持按 paper/teccl.md 重构后的 TE-CCL 时间展开 MILP 主路径，正式求解后端为 HiGHS
 - 支持最小端到端实验
 - 支持公平对比矩阵配置与枚举
 - 支持结果归因报告与交接报告生成
 - 支持分离导出 TE-CCL 的模型构建时间、求解时间、通信执行时间和端到端时间
+- 支持分离导出 CRUX 的路径/优先级构建时间、通信执行时间和端到端时间
 
 ## 目录结构
 
@@ -47,7 +48,7 @@ simulation/
 
 关键文件：
 
-- REDEME.md、explan.md：项目说明与解释
+- README.md、explan.md：项目说明与解释
 - configs/workload/XXX.yaml：流量文件
 - configs/topology/XXX.yaml：拓扑文件
 - configs/experiment/XXX.yaml：实验文件
@@ -73,7 +74,7 @@ conda activate networkSimulation
 
 建议第一次接手时按以下顺序阅读：
 
-1. explan.md与REDEME.md
+1. explan.md 与 README.md
 2. configs 中与你要运行的实验直接相关的配置文件
 
 ## 如何运行实验
@@ -151,6 +152,7 @@ comparison_summary.json 中会同时写出每个指标的 display_name、chart_t
 - flow_trace.csv：flow 级执行轨迹
 - schedule_history.json：每轮调度历史
 - scheduler_debug.json：调度器内部调试状态
+- crux_scheduler_stats.json：当 scheduler.type=crux 时，额外导出完整 CRUX profiling、图规模、cut 统计与执行增益
 - teccl_solver_stats.json：当 scheduler.type=teccl 时，额外导出完整求解统计与模型规模
 
 如果是通过 run_experiment_compare.sh 运行标准化对比，则在对比输出根目录下还会额外出现：
@@ -158,6 +160,17 @@ comparison_summary.json 中会同时写出每个指标的 display_name、chart_t
 - comparison_manifest.json：标准化 compare 入口的运行清单
 - comparison/comparison_summary.json：对比指标汇总
 - comparison/metric_plots/*.png：一指标一图的对比结果
+
+对于当前的 CRUX 实现，summary.json 与 crux_scheduler_stats.json 中最需要优先区分的是以下几个时间字段：
+
+- crux_scheduler_wall_time_ms：CRUX 从 intensity/path selection 到 DAG 压缩结束的总构建耗时
+- crux_path_selection_time_ms：路径选择耗时
+- crux_priority_assignment_time_ms：priority assignment 耗时
+- crux_priority_compression_time_ms：争用 DAG 构建、拓扑序采样与 DP 压缩耗时
+- crux_communication_execution_time_ms：按压缩后硬件优先级执行通信的耗时
+- crux_end_to_end_time_ms：构建耗时与执行耗时之和
+
+这组字段用于直接回答：CRUX 的收益来自建模/压缩，还是来自 priority-aware execution。
 
 对于当前的 TE-CCL 实现，summary.json 与 teccl_solver_stats.json 中最需要优先区分的是以下几个时间字段：
 
@@ -169,6 +182,8 @@ comparison_summary.json 中会同时写出每个指标的 display_name、chart_t
 - teccl_end_to_end_time_ms：求解总耗时与通信执行耗时之和
 
 这组字段用于直接回答：TE-CCL 慢，是慢在求解还是慢在通信。
+
+当前 comparison/metric_plots/completion_time_ms.png 会把 CRUX 和 TE-CCL 都画成“通信执行时间 + 规划/求解时间”的堆叠柱，便于直接对齐端到端口径。
 
 ## 公平对比规则
 
@@ -185,5 +200,5 @@ CRUX 与 TE-CCL 做比较时，下面这些公共字段必须保持一致：
 
 允许变化的仅是算法私有参数，例如：
 
-- CRUX：max_priority_levels、candidate_path_limit、intensity_window_iterations
+- CRUX：hardware_priority_count、candidate_path_limit、topological_order_sample_count、intensity_definition_mode、priority_factor_mode、enable_priority_aware_bandwidth
 - TE-CCL：epoch_size_ms、solver_backend、planning_horizon_epochs、max_solver_time_ms、mip_gap、solver_threads、objective_mode、switch_buffer_policy
