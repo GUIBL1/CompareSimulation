@@ -49,6 +49,8 @@ class CruxFlowInput:
     path_candidate_ids: list[str] = field(default_factory=list)
     best_candidate_path_id: str = ""
     best_candidate_transfer_time_ms: float = 0.0
+    selected_path_id: str = ""
+    selected_transfer_time_ms: float = 0.0
 
 
 @dataclass(slots=True)
@@ -116,6 +118,85 @@ class CruxModelInput:
             "flow_to_job_id": dict(self.flow_to_job_id),
             "flow_to_path_ids": {flow_id: list(path_ids) for flow_id, path_ids in self.flow_to_path_ids.items()},
         }
+
+    def apply_selected_paths(
+        self,
+        selected_path_ids_by_flow: dict[str, str],
+        selected_transfer_time_ms_by_flow: dict[str, float] | None = None,
+    ) -> None:
+        selected_transfer_time_ms_by_flow = selected_transfer_time_ms_by_flow or {}
+        job_selected_times: dict[str, list[float]] = {job_id: [] for job_id in self.job_by_id}
+        for flow_id, selected_path_id in selected_path_ids_by_flow.items():
+            flow_input = self.flow_by_id.get(flow_id)
+            path_input = self.path_by_id.get(selected_path_id)
+            if flow_input is None or path_input is None:
+                continue
+            flow_input.selected_path_id = selected_path_id
+            selected_transfer_time_ms = float(
+                selected_transfer_time_ms_by_flow.get(flow_id, path_input.load.estimated_transfer_time_ms)
+                or path_input.load.estimated_transfer_time_ms
+            )
+            flow_input.selected_transfer_time_ms = selected_transfer_time_ms
+            job_selected_times.setdefault(flow_input.owner_job_id, []).append(selected_transfer_time_ms)
+
+        for job_id, job_input in self.job_by_id.items():
+            if job_input.intensity is None:
+                continue
+            selected_tj_ms = max(job_selected_times.get(job_id, []), default=job_input.intensity.selected_tj_ms)
+            job_input.intensity.selected_tj_ms = max(selected_tj_ms, 1e-6)
+            job_input.intensity.intensity_value = job_input.intensity.compute_workload_w / max(job_input.intensity.selected_tj_ms, 1e-6)
+            job_input.intensity.metadata["tj_proxy_source"] = "selected_path_max_flow_time"
+            if job_input.priority is not None:
+                job_input.priority.intensity_value = job_input.intensity.intensity_value
+                job_input.priority.priority_score_pj = job_input.priority.dlt_factor_kj * job_input.intensity.intensity_value
+
+        ranked_jobs = sorted(
+            self.job_by_id.values(),
+            key=lambda job_input: (
+                -(job_input.priority.priority_score_pj if job_input.priority is not None else 0.0),
+                job_input.arrival_time_ms,
+                job_input.job_id,
+            ),
+        )
+        for rank_index, job_input in enumerate(ranked_jobs):
+            if job_input.priority is not None:
+                job_input.priority.raw_priority_rank = rank_index
+
+        self.summary.update(
+            {
+                "average_intensity": _average(
+                    [
+                        job_input.intensity.intensity_value
+                        for job_input in self.job_by_id.values()
+                        if job_input.intensity is not None
+                    ]
+                ),
+                "max_intensity": max(
+                    [
+                        job_input.intensity.intensity_value
+                        for job_input in self.job_by_id.values()
+                        if job_input.intensity is not None
+                    ],
+                    default=0.0,
+                ),
+                "average_priority_score": _average(
+                    [
+                        job_input.priority.priority_score_pj
+                        for job_input in self.job_by_id.values()
+                        if job_input.priority is not None
+                    ]
+                ),
+                "max_priority_score": max(
+                    [
+                        job_input.priority.priority_score_pj
+                        for job_input in self.job_by_id.values()
+                        if job_input.priority is not None
+                    ],
+                    default=0.0,
+                ),
+                "selected_path_count": sum(1 for flow_input in self.flow_by_id.values() if flow_input.selected_path_id),
+            }
+        )
 
 
 def build_crux_model_input(
@@ -255,32 +336,14 @@ def build_crux_model_input(
             },
         )
 
-    ranked_jobs = sorted(
-        job_by_id.values(),
-        key=lambda job_input: (
-            -(job_input.priority.priority_score_pj if job_input.priority is not None else 0.0),
-            job_input.arrival_time_ms,
-            job_input.job_id,
-        ),
-    )
-    for rank_index, job_input in enumerate(ranked_jobs):
-        if job_input.priority is not None:
-            job_input.priority.raw_priority_rank = rank_index
-
-    priority_scores = [
-        job_input.priority.priority_score_pj
-        for job_input in job_by_id.values()
-        if job_input.priority is not None
-    ]
-    intensity_values = [
-        job_input.intensity.intensity_value
-        for job_input in job_by_id.values()
-        if job_input.intensity is not None
-    ]
+    _assign_raw_priority_ranks(job_by_id)
+    priority_scores = [job_input.priority.priority_score_pj for job_input in job_by_id.values() if job_input.priority is not None]
+    intensity_values = [job_input.intensity.intensity_value for job_input in job_by_id.values() if job_input.intensity is not None]
     summary = {
         "job_count": len(job_by_id),
         "flow_count": len(flow_by_id),
         "path_candidate_count": len(path_by_id),
+        "selected_path_count": 0,
         "unique_link_count": len(unique_link_ids),
         "hardware_priority_count": priority_count,
         "average_intensity": sum(intensity_values) / len(intensity_values) if intensity_values else 0.0,
@@ -419,16 +482,63 @@ def _compute_dlt_factor(job: UnifiedJob, priority_factor_mode: str) -> float:
         return 1.0
     if priority_factor_mode == "participant_scaled":
         return float(max(1, len(job.participants)))
+    if priority_factor_mode == "dlt_aware":
+        participant_factor = 1.0 + min(max(len(job.participants) - 1, 0), 15) / 32.0
+        chunk_count = sum(len(demand.chunks) for demand in job.communication_demands)
+        chunk_factor = 1.0 + min(max(chunk_count - 1, 0), 15) / 64.0
+        communication_pattern = str(job.metadata.get("communication_pattern", ""))
+        if communication_pattern in {"all_reduce", "all_gather", "all_to_all", "reduce_scatter"}:
+            pattern_factor = 1.25
+        elif communication_pattern in {"broadcast", "multicast", "scatter", "reduce", "gather"}:
+            pattern_factor = 1.15
+        else:
+            pattern_factor = 1.05
+        dependency_mode = str(job.metadata.get("dependency_mode", ""))
+        if dependency_mode in {"barrier", "all_previous"}:
+            dependency_factor = 1.15
+        elif dependency_mode in {"strict", "serial", "chain", "chained", "sequential"}:
+            dependency_factor = 1.10
+        else:
+            dependency_factor = 1.0
+        overlap_denominator = max(job.repeat_interval_ms, job.compute_phase_ms, 1.0)
+        overlap_ratio = min(job.compute_phase_ms / overlap_denominator, 1.0)
+        overlap_factor = 1.0 + 0.2 * overlap_ratio
+        return participant_factor * chunk_factor * pattern_factor * dependency_factor * overlap_factor
     return 1.0
 
 
 def _describe_tj_mapping(intensity_definition_mode: str) -> str:
     if intensity_definition_mode == "path_estimated_comm_time":
         return "t_j := max(best candidate estimated transfer time per flow)"
+    if intensity_definition_mode == "selected_path_max_flow_time":
+        return "t_j := max(selected path estimated transfer time per flow after intensity-ordered path selection)"
     return "t_j := observed communication time proxy from legacy scheduler baseline"
 
 
 def _describe_priority_factor_mapping(priority_factor_mode: str) -> str:
     if priority_factor_mode == "participant_scaled":
         return "k_j := participant_count"
+    if priority_factor_mode == "dlt_aware":
+        return (
+            "k_j := participant_factor * chunk_factor * communication_pattern_factor * "
+            "dependency_factor * overlap_factor"
+        )
     return "k_j := 1.0 (stage-1 faithful approximation placeholder)"
+
+
+def _assign_raw_priority_ranks(job_by_id: dict[str, CruxJobInput]) -> None:
+    ranked_jobs = sorted(
+        job_by_id.values(),
+        key=lambda job_input: (
+            -(job_input.priority.priority_score_pj if job_input.priority is not None else 0.0),
+            job_input.arrival_time_ms,
+            job_input.job_id,
+        ),
+    )
+    for rank_index, job_input in enumerate(ranked_jobs):
+        if job_input.priority is not None:
+            job_input.priority.raw_priority_rank = rank_index
+
+
+def _average(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0

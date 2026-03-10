@@ -20,14 +20,17 @@ class CruxScheduler(Scheduler):
     hardware_priority_count: int | None = None
     candidate_path_limit: int = 8
     intensity_window_iterations: int = 3
-    intensity_definition_mode: str = "legacy_observed_comm_time_proxy"
-    priority_factor_mode: str = "neutral"
+    intensity_definition_mode: str = "selected_path_max_flow_time"
+    priority_factor_mode: str = "dlt_aware"
     observed_comm_time_ms: dict[str, float] = field(default_factory=dict)
     last_path_assignments: dict[str, list[str]] = field(default_factory=dict)
     last_priority_assignments: dict[str, int] = field(default_factory=dict)
     last_intensity_scores: dict[str, float] = field(default_factory=dict)
+    last_priority_scores: dict[str, float] = field(default_factory=dict)
     last_model_input: dict[str, object] = field(default_factory=dict)
     last_scheduler_wall_time_ms: float = 0.0
+    last_path_selection_time_ms: float = 0.0
+    last_priority_assignment_time_ms: float = 0.0
 
     def __post_init__(self) -> None:
         if self.hardware_priority_count is not None:
@@ -49,31 +52,66 @@ class CruxScheduler(Scheduler):
         started_at = perf_counter()
         self._refresh_observed_comm_time(runtime_state)
         model_input = self._build_model_input(runtime_state)
+        path_selection_started_at = perf_counter()
         provisional_link_loads: dict[str, int] = defaultdict(int)
         ranked_jobs = sorted(
             runtime_state.active_jobs,
             key=lambda job: (-self._intensity_score(job, model_input), job.arrival_time_ms, job.job_id),
+        )
+        selected_path_ids_by_flow: dict[str, str] = {}
+        selected_paths_by_flow: dict[str, list[str]] = {}
+        selected_transfer_time_ms_by_flow: dict[str, float] = {}
+        for job in ranked_jobs:
+            for flow_id, path_id, path, transfer_time_ms in self._select_stage2_paths_for_job(
+                job,
+                runtime_state,
+                model_input,
+                provisional_link_loads,
+            ):
+                selected_path_ids_by_flow[flow_id] = path_id
+                selected_paths_by_flow[flow_id] = path
+                selected_transfer_time_ms_by_flow[flow_id] = transfer_time_ms
+        model_input.apply_selected_paths(selected_path_ids_by_flow, selected_transfer_time_ms_by_flow)
+        self.last_path_selection_time_ms = (perf_counter() - path_selection_started_at) * 1000.0
+
+        priority_assignment_started_at = perf_counter()
+        ranked_job_inputs = sorted(
+            (job_input for job_input in model_input.job_by_id.values() if job_input.priority is not None),
+            key=lambda job_input: (
+                -job_input.priority.priority_score_pj,
+                job_input.arrival_time_ms,
+                job_input.job_id,
+            ),
         )
         decision = ScheduleDecision(
             decision_time_ms=runtime_state.now_ms,
             valid_until_ms=runtime_state.now_ms,
             metadata={
                 "scheduler": "crux",
-                "execution_mode": "legacy_boundary_with_stage1_inputs",
+                "execution_mode": "stage2_intensity_path_and_priority_assignment",
                 "intensity_scores": {},
+                "priority_scores": {},
             },
         )
-        job_count = max(1, len(ranked_jobs))
-        for index, job in enumerate(ranked_jobs):
-            intensity = self._intensity_score(job, model_input)
-            priority = self._compress_priority(index, job_count)
+        job_count = max(1, len(ranked_job_inputs))
+        for job_input in ranked_job_inputs:
+            job = next((candidate for candidate in runtime_state.active_jobs if candidate.job_id == job_input.job_id), None)
+            if job is None:
+                continue
+            intensity = job_input.intensity.intensity_value if job_input.intensity is not None else self._intensity_score(job, model_input)
+            priority_score = job_input.priority.priority_score_pj if job_input.priority is not None else intensity
+            rank_index = job_input.priority.raw_priority_rank if job_input.priority is not None else 0
+            priority = self._compress_priority(rank_index, job_count)
             decision.priority_assignments[job.job_id] = priority
             decision.metadata["intensity_scores"][job.job_id] = intensity
-            for flow_id, path in self._select_paths_for_job(job, runtime_state, provisional_link_loads).items():
+            decision.metadata["priority_scores"][job.job_id] = priority_score
+            for flow_id, path in self._selected_paths_for_job(job, selected_paths_by_flow).items():
                 decision.path_assignments[flow_id] = path
+        self.last_priority_assignment_time_ms = (perf_counter() - priority_assignment_started_at) * 1000.0
 
         self.last_priority_assignments = dict(decision.priority_assignments)
         self.last_intensity_scores = dict(decision.metadata["intensity_scores"])
+        self.last_priority_scores = dict(decision.metadata["priority_scores"])
         self.last_model_input = model_input.to_debug_dict()
         self.last_scheduler_wall_time_ms = (perf_counter() - started_at) * 1000.0
         return decision
@@ -83,8 +121,11 @@ class CruxScheduler(Scheduler):
             "observed_comm_time_ms": dict(self.observed_comm_time_ms),
             "last_priority_assignments": dict(self.last_priority_assignments),
             "last_intensity_scores": dict(self.last_intensity_scores),
+            "last_priority_scores": dict(self.last_priority_scores),
             "last_path_assignments": dict(self.last_path_assignments),
             "crux_scheduler_wall_time_ms": self.last_scheduler_wall_time_ms,
+            "crux_path_selection_time_ms": self.last_path_selection_time_ms,
+            "crux_priority_assignment_time_ms": self.last_priority_assignment_time_ms,
             "stage0_baseline": self._stage0_baseline_inventory(),
             "crux_model_input": dict(self.last_model_input),
             "crux_model_summary": dict(self.last_model_input.get("summary", {})) if self.last_model_input else {},
@@ -139,6 +180,121 @@ class CruxScheduler(Scheduler):
             return 0
         bucket_size = max(1, ceil(job_count / self.max_priority_levels))
         return min(rank_index // bucket_size, self.max_priority_levels - 1)
+
+    def _select_stage2_paths_for_job(
+        self,
+        job: UnifiedJob,
+        runtime_state: RuntimeState,
+        model_input: CruxModelInput,
+        provisional_link_loads: dict[str, int],
+    ) -> list[tuple[str, str, list[str], float]]:
+        selections: list[tuple[str, str, list[str], float]] = []
+        job_input = model_input.job_by_id.get(job.job_id)
+        if job_input is None:
+            return selections
+        for flow_id in job_input.flow_ids:
+            flow_input = model_input.flow_by_id.get(flow_id)
+            if flow_input is None:
+                continue
+            path_id, transfer_time_ms = self._select_stage2_best_path(flow_id, model_input, runtime_state, provisional_link_loads)
+            if not path_id:
+                continue
+            path_input = model_input.path_by_id.get(path_id)
+            if path_input is None:
+                continue
+            selections.append((flow_id, path_id, list(path_input.node_path), transfer_time_ms))
+            self.last_path_assignments[flow_id] = list(path_input.node_path)
+            self._reserve_path(path_input.node_path, runtime_state, provisional_link_loads)
+        return selections
+
+    def _select_stage2_best_path(
+        self,
+        flow_id: str,
+        model_input: CruxModelInput,
+        runtime_state: RuntimeState,
+        provisional_link_loads: dict[str, int],
+    ) -> tuple[str, float]:
+        flow_input = model_input.flow_by_id.get(flow_id)
+        if flow_input is None:
+            return "", 0.0
+        cached_path = self.last_path_assignments.get(flow_id)
+        candidate_ids = flow_input.path_candidate_ids
+        if not candidate_ids:
+            return "", 0.0
+        best_path_id = min(
+            candidate_ids,
+            key=lambda path_id: self._stage2_path_cost(
+                path_id=path_id,
+                model_input=model_input,
+                runtime_state=runtime_state,
+                provisional_link_loads=provisional_link_loads,
+                cached_path=cached_path,
+            ),
+        )
+        best_cost = self._stage2_path_cost(
+            path_id=best_path_id,
+            model_input=model_input,
+            runtime_state=runtime_state,
+            provisional_link_loads=provisional_link_loads,
+            cached_path=cached_path,
+        )
+        return best_path_id, best_cost[2]
+
+    def _stage2_path_cost(
+        self,
+        path_id: str,
+        model_input: CruxModelInput,
+        runtime_state: RuntimeState,
+        provisional_link_loads: dict[str, int],
+        cached_path: list[str] | None,
+    ) -> tuple[float, int, float, int, int]:
+        path_input = model_input.path_by_id[path_id]
+        projected_utilizations: list[float] = []
+        projected_contentions: list[int] = []
+        projected_bottleneck_bandwidth_gbps: float | None = None
+        projected_total_latency_ms = 0.0
+        for link_id in path_input.load.link_ids:
+            link_state = runtime_state.link_states.get(link_id)
+            active_flow_count = len(link_state.active_flows) if link_state is not None else 0
+            projected_contention = active_flow_count + provisional_link_loads.get(link_id, 0) + 1
+            projected_contentions.append(projected_contention)
+            if link_state is not None:
+                projected_utilizations.append(min(1.0, projected_contention / max(1, active_flow_count + 1) * link_state.utilization))
+                projected_link_bandwidth_gbps = link_state.bandwidth_gbps / projected_contention if projected_contention > 0 else 0.0
+                projected_bottleneck_bandwidth_gbps = (
+                    projected_link_bandwidth_gbps
+                    if projected_bottleneck_bandwidth_gbps is None
+                    else min(projected_bottleneck_bandwidth_gbps, projected_link_bandwidth_gbps)
+                )
+                projected_total_latency_ms += link_state.latency_us / 1000.0
+            else:
+                projected_utilizations.append(0.0)
+        projected_transfer_time_ms = path_input.load.estimated_transfer_time_ms
+        if projected_bottleneck_bandwidth_gbps is not None and projected_bottleneck_bandwidth_gbps > 1e-12:
+            projected_transfer_time_ms = (
+                path_input.chunk_size_mb / (projected_bottleneck_bandwidth_gbps * 0.125)
+            ) + projected_total_latency_ms
+        return (
+            max(projected_utilizations, default=0.0),
+            max(projected_contentions, default=0),
+            projected_transfer_time_ms,
+            0 if cached_path == path_input.node_path else 1,
+            self._stable_path_rank(path_input.flow_id, path_input.node_path),
+        )
+
+    def _selected_paths_for_job(self, job: UnifiedJob, selected_paths_by_flow: dict[str, list[str]]) -> dict[str, list[str]]:
+        assignments: dict[str, list[str]] = {}
+        for demand in job.communication_demands:
+            for chunk in demand.chunks:
+                for source_node in chunk.source_set:
+                    for destination_node in chunk.destination_set:
+                        if source_node == destination_node:
+                            continue
+                        flow_id = f"flow::{job.job_id}::{chunk.chunk_id}::{source_node}->{destination_node}"
+                        path = selected_paths_by_flow.get(flow_id)
+                        if path:
+                            assignments[flow_id] = path
+        return assignments
 
     def _select_paths_for_job(
         self,
@@ -270,5 +426,6 @@ class CruxScheduler(Scheduler):
                 "stage 1 adds simulator/schedulers/crux_model_input.py as the canonical CRUX input mapping layer",
                 "scheduler_debug now exports crux_model_input and crux_model_summary for later stage validation",
                 "CruxScheduler accepts hardware_priority_count as a forward-compatible alias of max_priority_levels",
+                "stage 2 switches CRUX path selection to intensity-ordered candidate evaluation and final priority assignment to P_j = k_j I_j",
             ],
         }

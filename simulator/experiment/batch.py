@@ -115,8 +115,8 @@ def _default_crux_scheduler_block(overrides: dict[str, Any] | None) -> dict[str,
         "hardware_priority_count": 4,
         "candidate_path_limit": 4,
         "intensity_window_iterations": 3,
-        "intensity_definition_mode": "legacy_observed_comm_time_proxy",
-        "priority_factor_mode": "neutral",
+        "intensity_definition_mode": "selected_path_max_flow_time",
+        "priority_factor_mode": "dlt_aware",
     }
     if overrides:
         block.update(overrides)

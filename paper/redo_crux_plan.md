@@ -453,6 +453,15 @@ CRUX 结果中必须新增以下指标：
 
 ### 阶段 2：路径选择与优先级分配落地
 
+当前状态：已完成（2026-03-10）
+
+落地产物：
+
+1. CRUX 调度主路径已改为先按 `I_j` 排序、再顺序执行路径选择，并将高 intensity 作业的路径预留效应传递到后续作业。
+2. 已在代码中落地 `P_j = k_j I_j`，其中默认 `k_j` 采用 documented faithful approximation：由 participant、chunk、communication pattern、dependency 和 overlap 五类 DLT 特征组合得到。
+3. 选路完成后会基于最终选中路径重新计算 `t_j`、`I_j` 和 `P_j`，并据此生成最终 priority rank 与硬件优先级分桶。
+4. scheduler_debug 与 summary 已补充 final intensity、final priority score、path selection time 与 priority assignment time 等阶段 2 结果。
+
 目标：完成 intensity-aware path selection 和 $P_j = k_j I_j$ 的正式建模。
 
 工作内容：
