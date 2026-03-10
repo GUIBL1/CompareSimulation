@@ -657,6 +657,115 @@ TE-CCL 结果中必须新增以下指标：
 2. HiGHS 能正常 optimize。
 3. 可导出变量数与约束数。
 
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 2 产出 A：新增代码模块
+
+本阶段已新增以下模块：
+
+1. `simulator/schedulers/teccl_milp_builder.py`
+	- 定义 `TECCLMILPBuildConfig`、`TECCLVariableBundle`、`TECCLMILPBuildResult`。
+	- 实现 `build_teccl_milp_model()`。
+	- 已正式创建 `F`、`B`、`R` 三类变量。
+	- 已正式实现容量约束、GPU 可复制约束线性化、relay 非复制约束、交换机守恒约束、buffer 更新约束、目的地约束与加权提前完成目标函数。
+
+2. `simulator/schedulers/teccl_highs_backend.py`
+	- 定义 `TECCLHighsSolveConfig`、`TECCLHighsSolveResult`。
+	- 实现 `solve_teccl_milp()`。
+	- 已支持 `time_limit`、`mip_gap`、`threads`、求解状态、目标值、最优界、gap、求解耗时和模型规模读取。
+
+3. `simulator/schedulers/__init__.py`
+	- 已导出阶段 2 的 builder/backend 公共入口，便于后续调度器主路径、阶段 3 统计层和阶段 4 解码层直接复用。
+
+#### 阶段 2 产出 B：变量与约束落地结论
+
+本阶段已明确以下 builder 落地结论。
+
+1. 变量索引已经稳定落地
+	- `F` 变量键定义为 `(commodity_id, edge_id, epoch_index)`。
+	- `B` 变量键定义为 `(commodity_id, node_id, epoch_index)`。
+	- `R` 变量键定义为 `(source_node, destination_node, commodity_id, epoch_index)`。
+	- 三类变量都能从 `TECCLModelInput` 反查回原始 commodity、edge、destination 语义。
+
+2. GPU 可复制约束已做显式线性化
+	- 说明中的 `max` 形式，当前在线性模型中改写为“对每条 GPU 出边分别约束”：
+	- `F[commodity, edge, k] <= B[commodity, src_node, k]`。
+	- 该改写保留了“GPU 只有在已持有 chunk 时才能发送”和“同一 chunk 可同时发往多条出边”这两个核心语义。
+
+3. relay 节点被单独建模为非复制缓冲节点
+	- 阶段 1 中保留下来的 `relay_nodes`，在阶段 2 未被直接并入 GPU 或 switch。
+	- 当前采用 `sum(outgoing) <= B[node, k]` 的约束形式，避免 host 等 relay 节点意外获得 GPU 式复制语义。
+
+4. 交换机约束已经按“零缓冲 + 延迟到达守恒”落地
+	- 交换机节点的 `B` 变量被固定为 0。
+	- 交换机守恒不再依赖旧状态机，而是直接基于 builder 中的延迟到达表达式，将“在 epoch `k` 到达交换机的流量”等于“epoch `k` 从交换机发出的流量”。
+
+5. buffer 更新已从运行时回写改为模型内显式约束
+	- 对非交换机节点，当前采用：
+	- `B[k] = B[k-1] + initial_buffer_at_k + arrivals_at_k`。
+	- 其中 `arrivals_at_k` 统一由 `send_epoch = k - delay_epochs - 1` 反推得到。
+	- 这使后续阶段不再需要依赖 runtime flow 完成事件去反推 TE-CCL buffer。
+
+6. 目的地约束已完成线性化
+	- 当前 `R` 变量采用累计接收量语义。
+	- 已实现 `R <= D`、`R <= B_dest`、`R[k] >= R[k-1]` 和末 epoch `R[last] = D`。
+	- 目标函数已按 `sum_k 1/(k+1) * R[k]` 形式直接作用于 `R` 变量。
+
+#### 阶段 2 产出 C：builder 可直接导出的模型规模摘要
+
+`TECCLMILPBuildResult.summary` 当前已经统一导出以下字段：
+
+1. `variable_count`
+2. `constraint_count`
+3. `non_zero_count`
+4. `flow_variable_count`
+5. `buffer_variable_count`
+6. `receive_variable_count`
+7. `integer_variable_count`
+8. `continuous_variable_count`
+9. `capacity_constraint_count`
+10. `gpu_availability_constraint_count`
+11. `relay_availability_constraint_count`
+12. `switch_flow_conservation_constraint_count`
+13. `buffer_update_constraint_count`
+14. `receive_constraint_count`
+
+这意味着阶段 3 不需要重新统计 builder 内部规模，只需要把这些字段接入 solver stats 与最终导出路径。
+
+#### 阶段 2 已验证结果
+
+已使用 `configs/topology/inter_dc_dual_fabric_topology.yaml` 加一个最小单播作业做 build/solve 验证，结果如下：
+
+1. 验证作业：`stage2_minimal_unicast`
+2. participants：`gpu_0 -> gpu_8`
+3. chunk_count：`1`
+4. total_data_mb：`24.0`
+5. epoch_size_ms：`1.0`
+6. planning_horizon_epochs：`40`
+7. `variable_count = 9480`
+8. `constraint_count = 11880`
+9. `non_zero_count = 24779`
+10. `flow_variable_count = 7120`
+11. `buffer_variable_count = 2320`
+12. `receive_variable_count = 40`
+13. HiGHS `model_status = Optimal`
+14. `objective_value = 13.583775798823641`
+15. `best_bound = 13.583775798823641`
+16. `mip_gap = 0.0`
+17. `solve_time_ms = 67.44482799967955`
+
+#### 阶段 2 结论
+
+阶段 2 已完成，并得到以下明确结论：
+
+1. 阶段 1 的 `TECCLModelInput` 已足以直接驱动正式 HiGHS builder，不需要再回退到旧 TE-CCL 的候选动作枚举。
+2. 三类核心变量、六类核心约束和加权目标函数已经在代码中形成独立 builder，可单独 build、optimize 并返回规模摘要。
+3. 后续阶段 3 可以直接围绕 `TECCLMILPBuildResult` 和 `TECCLHighsSolveResult` 接入求解统计，无需重新设计模型内部结构。
+
 ### 阶段 3：求解统计与负载统计
 
 目标：补齐你要求的“求解时间和对应负载记录”。
