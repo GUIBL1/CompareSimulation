@@ -167,7 +167,17 @@ def _build_teccl_metrics(
     for key, value in solver_stats.items():
         if isinstance(value, int | float | str | bool):
             metrics[key] = value
+    communication_execution_time_ms = _derive_teccl_communication_execution_time_ms(schedule_history)
+    metrics["teccl_communication_execution_time_ms"] = communication_execution_time_ms
+    solver_wall_time_ms = float(solver_stats.get("teccl_solver_wall_time_ms", 0.0) or 0.0)
+    metrics["teccl_end_to_end_time_ms"] = solver_wall_time_ms + communication_execution_time_ms
     return metrics
+
+
+def _derive_teccl_communication_execution_time_ms(schedule_history: list[dict[str, Any]]) -> float:
+    if not schedule_history:
+        return 0.0
+    return max(float(item.get("valid_until_ms", item.get("time_ms", 0.0)) or 0.0) for item in schedule_history)
 
 
 def _build_teccl_solver_stats_payload(

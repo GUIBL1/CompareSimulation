@@ -197,9 +197,31 @@ def _build_phase_timing_summary(
     if scheduler_type == "teccl":
         epoch_size_ms = float((scheduler_debug_state.get("strategy") or {}).get("epoch_size_ms", 0.0) or 0.0)
         active_epochs = [item for item in schedule_history if int(item.get("epoch_action_count", 0)) > 0]
+        solver_stats = scheduler_debug_state.get("teccl_solver_stats") or {}
+        solver_wall_time_ms = float(solver_stats.get("teccl_solver_wall_time_ms", 0.0) or 0.0)
+        model_build_time_ms = float(solver_stats.get("teccl_model_build_time_ms", 0.0) or 0.0)
+        solve_only_time_ms = float(solver_stats.get("teccl_solve_only_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("teccl_communication_execution_time_ms", completion_time_ms) or completion_time_ms
+        )
+        end_to_end_time_ms = float(
+            repetition_summary.get("teccl_end_to_end_time_ms", solver_wall_time_ms + communication_execution_time_ms)
+            or (solver_wall_time_ms + communication_execution_time_ms)
+        )
         phase_summary["epoch_size_ms"] = epoch_size_ms
         phase_summary["active_epoch_count"] = len(active_epochs)
         phase_summary["epoch_runtime_ms"] = len(active_epochs) * epoch_size_ms
+        phase_summary["teccl_model_build_time_ms"] = model_build_time_ms
+        phase_summary["teccl_solve_only_time_ms"] = solve_only_time_ms
+        phase_summary["teccl_solver_wall_time_ms"] = solver_wall_time_ms
+        phase_summary["teccl_communication_execution_time_ms"] = communication_execution_time_ms
+        phase_summary["teccl_end_to_end_time_ms"] = end_to_end_time_ms
+        if solver_wall_time_ms > communication_execution_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "solver"
+        elif communication_execution_time_ms > solver_wall_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "communication"
+        else:
+            phase_summary["dominant_phase"] = "balanced"
     return phase_summary
 
 

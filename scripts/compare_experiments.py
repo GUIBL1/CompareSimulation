@@ -68,6 +68,7 @@ def main() -> None:
         label_b=label_b,
         title=args.title,
     )
+    comparison_summary = json.loads(Path(comparison_outputs["summary_json"]).read_text(encoding="utf-8"))
 
     manifest = {
         "experiment_a": str(experiment_a),
@@ -79,6 +80,7 @@ def main() -> None:
         "run_b_output_dir": str(run_b_dir),
         "comparison_output_dir": str(comparison_dir),
         "comparison_outputs": comparison_outputs,
+        "comparison_metrics": comparison_summary.get("metrics", []),
     }
     manifest_path = output_dir / "comparison_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")

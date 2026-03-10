@@ -56,7 +56,7 @@
 2. Link
 3. TopologyGraph
 
-构建完成后，系统会预生成 candidate_paths。CRUX 主要直接消费这些路径候选；TE-CCL 则主要按邻接关系和局部 hop 行动来生成 epoch action。
+构建完成后，系统会预生成 candidate_paths。CRUX 主要直接消费这些路径候选；TE-CCL 则把 topology 转成时间展开 MILP 所需的节点、链路、epoch 与 commodity 索引，再生成完整 epoch 计划。
 
 ### 2.4 离散事件执行器
 
@@ -74,7 +74,7 @@
 这意味着系统里真正被传输的是 flow，但这些 flow 的来源有两种：
 
 1. CRUX：直接把 job/chunk 的端到端传输物化成 flow。
-2. TE-CCL：先输出 epoch action，再由执行器把每个 hop action 物化成 flow。
+2. TE-CCL：先一次性求出全局 epoch 计划，再由执行器按 epoch 回放计划中的 hop 传输。
 
 ### 2.5 带宽与时间推进
 
@@ -138,78 +138,64 @@ $$
 
 ### 4.1 当前 TE-CCL 的语义边界
 
-当前 TE-CCL 的实现，不是“普通 shortest path 转发”，而是保留了以下关键语义：
+当前 TE-CCL 主路径已经切换为按 paper/teccl.md 落地的时间展开多商品流 MILP。它保留的关键语义是：
 
-1. 调度粒度是 chunk replica。
-2. 决策时间是 epoch。
-3. GPU 可以复制，也可以缓存收到的 chunk。
-4. 交换机不允许长期缓存，不承担持久副本语义。
-5. 输出不是最终路径，而是一组 epoch action。
+1. 调度粒度是 chunk commodity。
+2. 规划时间轴是离散 epoch。
+3. GPU 可以复制并保留已接收 chunk。
+4. 交换机遵循非复制、零持久 buffer 语义。
+5. 目标函数优先奖励更早完成的接收量。
 
-其中 GPU 和交换机的语义差异是这套实现最重要的约束之一。
+### 4.2 当前 TE-CCL 的建模对象
 
-### 4.2 当前 TE-CCL 的内部状态
+当前主实现会把统一 workload 与 topology 映射到以下数学对象：
 
-当前 TE-CCL 维护的核心状态包括：
+1. 节点集合、链路集合、commodity 集合与 epoch 集合。
+2. 需求矩阵 $D_{s,d,c}$。
+3. 流量变量 $F_{s,i,j,k,c}$。
+4. 缓冲变量 $B_{s,n,k,c}$。
+5. 接收变量 $R_{s,d,k,c}$。
 
-1. `delivered_destinations`
-   哪些目的 GPU 已经收到该 replica。
-2. `inflight_destinations`
-   哪些目的地已经在飞行中，以及预期到达 epoch。
-3. `gpu_buffers`
-   哪些 GPU 当前持有该 replica，以及从哪个 epoch 开始可继续发送。
-4. `switch_arrivals`
-   哪些交换机已经在某个 epoch 收到该 replica，等待转发。
-5. `completed_replica_ids`
-   哪些 replica 已经对其所有目标完成送达。
+求解器不再按当前 runtime 状态逐 epoch 重新做局部候选动作选择，而是先构建完整 MILP，再一次性求出全局计划。
 
-### 4.3 当前 TE-CCL 的求解后端
+### 4.3 当前 TE-CCL 的正式求解后端
 
-当前系统支持三种求解后端：
+当前系统正式支持的 TE-CCL 主后端是 `highs`，通过 `highspy` 调用 HiGHS。
 
-1. `small_scale_debug_solver`
-   小规模枚举搜索，用于校验语义正确性。
-2. `heuristic_solver`
-   贪心近似后端，适合中大规模候选空间。
-3. `exact_milp_solver`
-   基于 pulp/CBC 的 0-1 MILP 选择器，用于更精确地从 epoch 候选动作中选一组动作。
+当前实验入口默认会把以下参数交给新主路径：
 
-这里的 exact MILP 不是“整场实验一次性全局求解”，而是“每个 epoch 对当前候选动作做一次精确选择”。
+1. `epoch_size_ms`
+2. `planning_horizon_epochs`
+3. `max_solver_time_ms`
+4. `mip_gap`
+5. `solver_threads`
+6. `enforce_integrality`
+7. `objective_mode`
+8. `switch_buffer_policy`
 
-### 4.4 当前 exact MILP 实现方式
+旧的 `small_scale_debug_solver`、`heuristic_solver` 和 `exact_milp_solver` 不再作为正式对比实验的主后端口径。
 
-当前 MILP 后端解决的问题是：
+### 4.4 当前 TE-CCL 的执行方式
 
-在某个 epoch，给定所有候选动作，选择一组动作，使得目标送达收益最大，同时满足约束。
+当前 TE-CCL 的主执行路径分为三个阶段：
 
-当前约束主要包括：
+1. 建模：把 topology 和 workload 转成时间展开 MILP。
+2. 求解：用 HiGHS 求出完整 epoch 计划。
+3. 回放：把求得的计划解码后交给 runtime 执行。
 
-1. 每个候选组最多选一个动作。
-2. 同一 replica 对同一 ultimate destination 不能重复选。
-3. 在禁止 switch replication 时，同一交换机本 epoch 至多选一个 switch action。
-4. 同一 `(current_node, next_node)` hop 在本 epoch 不能重复选。
-5. 已经物化过的同一 epoch-hop-flow 不允许再次被选中。
+因此，当前 runtime 对 TE-CCL 的角色是“执行计划”，而不是“驱动求解”。
 
-当前目标函数是一个工程化目标，而不是论文原式逐项复刻。它优先奖励：
+### 4.5 当前 TE-CCL 的时间口径
 
-1. 产生有效送达推进的动作。
-2. 更直接的送达。
-3. GPU 侧复制动作。
-4. 更早到达的动作。
-5. 更短的 route fragment。
+为了避免把“算计划慢”和“通信慢”混在一起，当前结果中会分开导出：
 
-因此，它更准确地说是“精确求解当前 epoch 的动作选择问题”。
+1. `teccl_model_build_time_ms`
+2. `teccl_solve_only_time_ms`
+3. `teccl_solver_wall_time_ms`
+4. `teccl_communication_execution_time_ms`
+5. `teccl_end_to_end_time_ms`
 
-### 4.5 当前 TE-CCL 没做什么
-
-当前实现还没有做到：
-
-1. 全时域联合 MILP。
-2. 严格论文级完整变量和完整约束系统。
-3. 更复杂的交换机级多资源约束。
-4. 更细粒度的 buffer 容量竞争模型。
-
-所以，当前 TE-CCL 是“语义完整优先、求解后端渐进增强”的实现路线。
+阶段 6 的回归结果已经验证了这组时间口径是有区分度的：最小案例由通信执行主导，而 dual mild 与 triple heavy 案例都明显由求解阶段主导。
 
 ## 5. 结果是如何导出的
 

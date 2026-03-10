@@ -1032,6 +1032,90 @@ TE-CCL 结果中必须新增以下指标：
 1. 至少 3 个小规模手工案例通过。
 2. 发现无解时能输出可解释信息。
 
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 5 产出 A：新增正确性验证脚本
+
+本阶段已新增以下验证入口：
+
+1. `scripts/validate_teccl_stage5.py`
+	- 直接构造小拓扑、小工作负载并调用阶段 2/3 的 builder + HiGHS backend。
+	- 会生成 `results/stage5_teccl_validation/validation_report.json`。
+	- 当前覆盖容量约束、GPU 复制、交换机非复制、延迟传播和短 horizon 无解诊断。
+
+2. `simulator/core/__init__.py`
+	- 已改为懒加载 `RuntimeEngine`，修复阶段 5 验证时暴露出的 package 级导入环。
+	- 该修复同时降低了后续验证/脚本入口触发 `core -> engine -> schedulers -> base -> core` 循环的风险。
+
+#### 阶段 5 产出 B：已完成的手工验证案例
+
+本阶段已完成以下 4 个手工案例。
+
+1. `capacity_shared_link`
+	- 拓扑：`gpu_0 -> sw_0 -> gpu_2` 与 `gpu_1 -> sw_0 -> gpu_2` 共享单一瓶颈出边。
+	- 目标：验证共享瓶颈链路上的容量约束。
+	- 结果：通过。
+	- 关键现象：瓶颈边 `l2::fwd` 在 epoch 1 和 epoch 2 的负载分别为 `10.0 MB`，恰好等于 `capacity_mb_per_epoch = 10.0`，未出现超额发送。
+
+2. `gpu_replication`
+	- 拓扑：`gpu_0` 直接连接 `gpu_1`、`gpu_2`。
+	- 目标：验证 GPU 对同一 commodity 的复制发送语义。
+	- 结果：通过。
+	- 关键现象：在多个 epoch 中同时出现 `g0g1::fwd` 和 `g0g2::fwd` 正流量，说明 GPU 端复制已在模型中生效，而不是退化成交换机式单路守恒。
+
+3. `switch_non_replication_delay`
+	- 拓扑：`gpu_0 -> sw_0 -> {gpu_1, gpu_2}`，其中 `gpu_0 -> sw_0` 具有 1 个 delay epoch。
+	- 目标：同时验证交换机零缓冲非复制和延迟传播。
+	- 结果：通过。
+	- 关键现象：
+	- `switch_epoch_balance` 中所有活跃 epoch 都满足 `incoming = outgoing = 10.0`。
+	- `switch_buffer_timeline = {}`，说明交换机未持有正缓冲。
+	- 在最早可到达 epoch 前，交换机 buffer 没有提前出现正值，符合 delay propagation 语义。
+
+4. `infeasible_short_horizon`
+	- 拓扑：单跳 `gpu_0 -> gpu_1`，链路 delay 为 2 epochs。
+	- 目标：验证当规划 horizon 短于最早可接收 epoch 时，模型能报告无解并给出可解释原因。
+	- 结果：通过。
+	- 关键现象：
+	- `solver_status = Infeasible`
+	- 诊断原因已输出为：`planning horizon is shorter than the first feasible receive epoch implied by link delay and buffer update semantics`
+
+#### 阶段 5 已验证结果
+
+当前阶段 5 验证报告已生成于：`results/stage5_teccl_validation/validation_report.json`
+
+验证结果如下：
+
+1. `passed_case_count = 4`
+2. `total_case_count = 4`
+3. 可行案例通过数：`3`
+4. 无解诊断案例通过数：`1`
+5. `capacity_shared_link`
+	- `variable_count = 176`
+	- `constraint_count = 224`
+	- `shared_edge_epoch_loads = {1: 10.0, 2: 10.0}`
+6. `gpu_replication`
+	- `replication_epochs = {0, 1, 2}`
+7. `switch_non_replication_delay`
+	- `delay_epochs_src_sw = 1`
+	- `switch_buffer_timeline = {}`
+8. `infeasible_short_horizon`
+	- `status = Infeasible`
+	- `planning_horizon_epochs = 2`
+	- `delay_epochs = 2`
+
+#### 阶段 5 结论
+
+阶段 5 已完成，并得到以下明确结论：
+
+1. 至少 3 个小规模手工案例已经通过，且覆盖了容量约束、GPU 复制语义、交换机非复制语义和延迟传播语义。
+2. 短 horizon 无解案例已经能够稳定返回 `Infeasible`，并输出与模型语义一致的可解释诊断信息。
+3. 后续阶段 6 可以直接把 highs 规划模式接回现有实验入口，重点转向实验回归、求解耗时与通信耗时对比，以及负载规模和模型规模分析。
+
 ### 阶段 6：实验回归与性能分析
 
 目标：把新实现接回现有实验入口，并分析求解耗时。
@@ -1049,6 +1133,33 @@ TE-CCL 结果中必须新增以下指标：
 1. 至少一组完整实验产出可用 summary、trace、solver stats。
 2. 能清楚回答“慢在求解还是慢在通信”。
 
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 6 已完成内容
+
+1. 新增 `scripts/run_teccl_stage6_regression.py`，默认运行 minimal、inter-DC mild、triple-heavy 三档 TE-CCL 回归。
+2. 新增 `configs/topology/stage6_minimal_teccl_topology.yaml`、`configs/workload/stage6_minimal_teccl_workload.yaml` 与 `configs/experiment/stage6_minimal_teccl.yaml` 作为最小回归基线。
+3. 将现有 TE-CCL 实验配置的正式后端切换为 `highs`，并补齐 `planning_horizon_epochs`、`solver_threads`、`objective_mode`、`switch_buffer_policy` 等新字段。
+4. 在导出层补充 `teccl_communication_execution_time_ms` 与 `teccl_end_to_end_time_ms`，并在回归报告中给出主导阶段判断。
+
+#### 阶段 6 已验证结果
+
+1. `results/stage6_minimal_teccl` 已生成完整 `summary.json`、`scheduler_debug.json`、`flow_trace.csv`、`schedule_history.json` 和 `teccl_solver_stats.json`；该案例中 solver wall time 为 17.54 ms，communication execution time 为 30.0 ms，主导阶段为 communication。
+2. `results/inter_dc_mild_teccl` 已生成完整结果；该案例中 solver wall time 为 6203.30 ms，communication execution time 为 145.0 ms，主导阶段为 solver，模型规模为 22944 变量 / 20544 约束。
+3. `results/inter_dc_parallel_triple_heavy_teccl` 已生成完整结果；该案例中 solver wall time 为 356600.14 ms，communication execution time 为 16000.0 ms，主导阶段仍为 solver，模型规模为 177280 变量 / 85560 约束。
+
+#### 阶段 6 结论
+
+阶段 6 已完成，并得到以下明确结论：
+
+1. 新 TE-CCL 主路径已经成功接回现有实验入口，且能稳定导出 summary、trace 与 solver stats 三类工件。
+2. 当前 dual mild 与 triple-heavy 的“运行时间长”主要是求解阶段成本，而不是 runtime 通信执行成本。
+3. 影响 TE-CCL 求解耗时的关键因素已明确体现为 planning horizon、commodity 数、destination pair 数、拓扑边数和整体模型规模。
+
 ### 阶段 7：文档与配置同步
 
 目标：让文档、配置说明、实现完全一致。
@@ -1064,6 +1175,31 @@ TE-CCL 结果中必须新增以下指标：
 
 1. 文档中不再描述旧 exact_milp_solver 的工程近似语义。
 2. 文档能正确解释求解时间与执行时间的差别。
+
+#### 阶段状态
+
+状态：已完成
+
+执行时间：2026-03-10
+
+#### 阶段 7 已完成内容
+
+1. 更新项目 `README.md`，补充 Stage 6 回归入口、HiGHS 主后端说明，以及 solver/build/communication/end-to-end 时间字段说明。
+2. 更新 `explan.md`，将 TE-CCL 描述改为时间展开 MILP + HiGHS + 计划回放的正式实现口径。
+3. 更新 `configs/experiment/README.md`，同步新的 TE-CCL 配置字段与推荐写法。
+4. 将批量实验默认 TE-CCL 配置切换为 `highs`，避免新生成实验继续落到旧 backend 名称。
+
+#### 阶段 7 已验证结果
+
+1. 文档主路径已经不再把 `exact_milp_solver` 描述为当前正式 TE-CCL 语义。
+2. README、实现说明与配置说明都已能一致解释 `teccl_solver_wall_time_ms`、`teccl_communication_execution_time_ms` 与 `teccl_end_to_end_time_ms` 的差别。
+
+#### 阶段 7 结论
+
+阶段 7 已完成，并得到以下明确结论：
+
+1. 当前代码、实验配置与说明文档已经统一到 HiGHS 时间展开 MILP 主路径。
+2. 后续讨论 TE-CCL 性能时，可以直接用 Stage 6 报告中的 solver-vs-communication 口径，而不再依赖旧 epoch action 选择器语义。
 
 ## 12. 开发跟踪规则
 

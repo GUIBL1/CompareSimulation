@@ -24,8 +24,13 @@ scheduler:
     intensity_window_iterations: 3
   teccl:
     epoch_size_ms: 1
-    solver_backend: small_scale_debug_solver
-    max_solver_time_ms: 1000
+    solver_backend: highs
+    planning_horizon_epochs: 32
+    max_solver_time_ms: 5000
+    solver_threads: 4
+    enforce_integrality: true
+    objective_mode: weighted_early_completion
+    switch_buffer_policy: zero
     allow_gpu_replication: true
     allow_switch_replication: false
     enable_gpu_buffer: true
@@ -77,8 +82,14 @@ metrics:
 #### TECCL 参数
 
 - `epoch_size_ms`：必填。一个 epoch 的时长，单位毫秒。
-- `solver_backend`：必填。当前实现支持 `small_scale_debug_solver` 和 `heuristic_solver`。
+- `solver_backend`：必填。当前正式后端使用 `highs`。
+- `planning_horizon_epochs`：建议显式填写。时间展开规划窗口的 epoch 数。
 - `max_solver_time_ms`：求解器时间预算。
+- `mip_gap`：可选。HiGHS 的 MIP gap 目标。
+- `solver_threads`：可选。HiGHS 线程数。
+- `enforce_integrality`：是否保持整数建模。
+- `objective_mode`：当前默认 `weighted_early_completion`。
+- `switch_buffer_policy`：当前默认 `zero`，对应交换机零持久 buffer 语义。
 - `allow_gpu_replication`：是否允许 GPU 复制。
 - `allow_switch_replication`：是否允许交换机复制。当前公平实验通常设为 `false`。
 - `enable_gpu_buffer`：是否启用 GPU buffer 语义。
@@ -117,8 +128,13 @@ scheduler:
   type: teccl
   teccl:
     epoch_size_ms: 1
-    solver_backend: small_scale_debug_solver
-    max_solver_time_ms: 1000
+    solver_backend: highs
+    planning_horizon_epochs: 32
+    max_solver_time_ms: 5000
+    solver_threads: 4
+    enforce_integrality: true
+    objective_mode: weighted_early_completion
+    switch_buffer_policy: zero
     allow_gpu_replication: true
     allow_switch_replication: false
     enable_gpu_buffer: true
@@ -133,12 +149,14 @@ scheduler:
 
 - 公平对比时，CRUX 与 TECCL 两个 experiment 只应在 `scheduler` 参数上不同。
 - `metrics.output_dir` 不要复用同一目录，避免结果相互覆盖。
-- 调试 TECCL 时优先从 `small_scale_debug_solver` 开始，再切换到 `heuristic_solver`。
+- 当前正式实验建议直接使用 `solver_backend: highs`，并显式控制 `planning_horizon_epochs` 与 `max_solver_time_ms`。
+- 如果 TE-CCL 运行时间过长，优先检查 `planning_horizon_epochs`、chunk 数、目的地对数量、拓扑边数和 `mip_gap` 设置，而不是先怀疑 runtime 通信执行。
 - 如果只想跑 1 次最小复现，把 `repetitions` 设为 `1`，并把 `max_time_ms` 控制在较小范围。
 
 ## 常见错误
 
 - `scheduler.type=teccl` 但漏写 `scheduler.teccl.epoch_size_ms` 或 `solver_backend`。
+- `scheduler.type=teccl` 但没有显式限制 `planning_horizon_epochs`，导致时间展开 MILP 模型规模过大。
 - `scheduler.type=crux` 但漏写 `scheduler.crux.max_priority_levels`。
 - `output_dir` 为空。
 - `topology_file`、`workload_file` 路径写错。

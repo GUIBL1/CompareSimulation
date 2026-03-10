@@ -118,8 +118,22 @@ def _metric_specs() -> list[dict[str, str]]:
         {
             "id": "completion_time_ms",
             "display_name": "Completion Time（完成时间）",
-            "chart_type": "bar",
+            "chart_type": "stacked_bar",
             "value_key": "completion_time_ms",
+            "axis_label": "Time (ms)（时间，毫秒）",
+        },
+        {
+            "id": "planning_time_ms",
+            "display_name": "Planning / Solver Time（规划/求解时间）",
+            "chart_type": "bar",
+            "value_key": "planning_time_ms",
+            "axis_label": "Time (ms)（时间，毫秒）",
+        },
+        {
+            "id": "communication_execution_time_ms",
+            "display_name": "Communication Execution Time（通信执行时间）",
+            "chart_type": "bar",
+            "value_key": "communication_execution_time_ms",
             "axis_label": "Time (ms)（时间，毫秒）",
         },
         {
@@ -263,6 +277,12 @@ def _build_comparison_summary(
 
 
 def _summary_value(metrics: dict[str, Any], spec: dict[str, str]) -> Any:
+    if spec["chart_type"] == "stacked_bar":
+        return {
+            "total_ms": float(metrics.get(spec["value_key"], 0.0) or 0.0),
+            "communication_ms": float(metrics.get("communication_execution_time_ms", 0.0) or 0.0),
+            "solver_ms": float(metrics.get("planning_time_ms", 0.0) or 0.0),
+        }
     if spec["chart_type"] == "ecdf":
         return _format_percentiles(metrics.get(spec["id"], {}), [label for _, label in PERCENTILE_LEVELS])
     if spec["chart_type"] == "grouped_bar":
@@ -280,6 +300,18 @@ def _render_metric_plot(
     title: str,
 ) -> None:
     chart_type = spec["chart_type"]
+    if chart_type == "stacked_bar":
+        _plot_stacked_completion_metric(
+            metric_name=spec["display_name"],
+            metrics_a=metrics_a,
+            metrics_b=metrics_b,
+            label_a=label_a,
+            label_b=label_b,
+            axis_label=spec["axis_label"],
+            output_path=output_path,
+            title=title,
+        )
+        return
     if chart_type == "dumbbell":
         _plot_dumbbell_metric(
             metric_name=spec["display_name"],
@@ -331,6 +363,53 @@ def _render_metric_plot(
         )
         return
     raise ValueError(f"Unsupported chart type: {chart_type}")
+
+
+def _plot_stacked_completion_metric(
+    metric_name: str,
+    metrics_a: dict[str, Any],
+    metrics_b: dict[str, Any],
+    label_a: str,
+    label_b: str,
+    axis_label: str,
+    output_path: Path,
+    title: str,
+) -> None:
+    labels = [label_a, label_b]
+    communication_values = [
+        float(metrics_a.get("communication_execution_time_ms", 0.0) or 0.0),
+        float(metrics_b.get("communication_execution_time_ms", 0.0) or 0.0),
+    ]
+    solver_values = [
+        float(metrics_a.get("planning_time_ms", 0.0) or 0.0),
+        float(metrics_b.get("planning_time_ms", 0.0) or 0.0),
+    ]
+    totals = [
+        float(metrics_a.get("completion_time_ms", 0.0) or 0.0),
+        float(metrics_b.get("completion_time_ms", 0.0) or 0.0),
+    ]
+
+    fig, axis = plt.subplots(figsize=(8, 5.5))
+    bars_communication = axis.bar(labels, communication_values, color="#4c78a8", width=0.6, label="Communication（通信）")
+    bars_solver = axis.bar(
+        labels,
+        solver_values,
+        bottom=communication_values,
+        color="#f58518",
+        width=0.6,
+        label="Planning / Solver（规划/求解）",
+    )
+    axis.set_title(f"{title} - {metric_name}")
+    axis.set_ylabel(axis_label)
+    axis.grid(axis="y", alpha=0.3)
+    axis.legend()
+    for index, total in enumerate(totals):
+        bar = bars_solver[index] if solver_values[index] > 0 else bars_communication[index]
+        top = communication_values[index] + solver_values[index]
+        axis.text(bar.get_x() + bar.get_width() / 2, top, _format_number(total), ha="center", va="bottom")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_bar_metric(
@@ -472,15 +551,31 @@ def _compute_comparison_metrics(
     flow_rows: list[dict[str, str]],
 ) -> dict[str, Any]:
     repetition_summary = (summary.get("repetitions") or [{}])[0]
+    scheduler_type = str(summary.get("scheduler_type", repetition_summary.get("scheduler_type", "unknown"))).lower()
     total_jobs = int(repetition_summary.get("total_job_count", 0) or 0)
     completed_jobs = int(repetition_summary.get("completed_job_count", 0) or 0)
+    runtime_completion_time_ms = float(repetition_summary.get("completion_time_ms", 0.0) or 0.0)
+    planning_time_ms = float(repetition_summary.get("teccl_solver_wall_time_ms", 0.0) or 0.0) if scheduler_type == "teccl" else 0.0
+    communication_execution_time_ms = float(
+        repetition_summary.get("teccl_communication_execution_time_ms", runtime_completion_time_ms) or runtime_completion_time_ms
+    )
+    end_to_end_time_ms = float(
+        repetition_summary.get(
+            "teccl_end_to_end_time_ms",
+            planning_time_ms + communication_execution_time_ms if scheduler_type == "teccl" else runtime_completion_time_ms,
+        )
+        or (planning_time_ms + communication_execution_time_ms if scheduler_type == "teccl" else runtime_completion_time_ms)
+    )
 
     bottleneck = _build_bottleneck_metrics(trace_rows)
     logical_flow_durations = _extract_logical_transfer_durations(flow_rows)
     job_completion_durations = _extract_job_completion_durations(flow_rows)
 
     return {
-        "completion_time_ms": float(repetition_summary.get("completion_time_ms", 0.0) or 0.0),
+        "completion_time_ms": end_to_end_time_ms,
+        "runtime_completion_time_ms": runtime_completion_time_ms,
+        "planning_time_ms": planning_time_ms,
+        "communication_execution_time_ms": communication_execution_time_ms,
         "job_completion_ratio": (completed_jobs / total_jobs) if total_jobs > 0 else 0.0,
         "bottleneck_link_peak_utilization": bottleneck["peak_utilization"],
         "bottleneck_link_average_utilization": bottleneck["average_utilization"],
@@ -493,6 +588,7 @@ def _compute_comparison_metrics(
         "completion_time_spread_ms": _population_stddev(job_completion_durations),
         "congestion_duration_ms": bottleneck["congestion_duration_ms"],
         "bottleneck_link_id": bottleneck["link_id"],
+        "scheduler_type": scheduler_type,
     }
 
 

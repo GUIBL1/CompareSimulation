@@ -14,10 +14,11 @@
 - 支持统一工作负载模型，供 CRUX 和 TE-CCL 共用
 - 支持最小离散事件执行器、链路共享和结果导出
 - 支持 CRUX 基线调度
-- 支持 TE-CCL 语义、小规模求解后端和启发式后端，MILP后端
+- 支持按 paper/teccl.md 重构后的 TE-CCL 时间展开 MILP 主路径，正式求解后端为 HiGHS
 - 支持最小端到端实验
 - 支持公平对比矩阵配置与枚举
 - 支持结果归因报告与交接报告生成
+- 支持分离导出 TE-CCL 的模型构建时间、求解时间、通信执行时间和端到端时间
 
 ## 目录结构
 
@@ -150,12 +151,24 @@ comparison_summary.json 中会同时写出每个指标的 display_name、chart_t
 - flow_trace.csv：flow 级执行轨迹
 - schedule_history.json：每轮调度历史
 - scheduler_debug.json：调度器内部调试状态
+- teccl_solver_stats.json：当 scheduler.type=teccl 时，额外导出完整求解统计与模型规模
 
 如果是通过 run_experiment_compare.sh 运行标准化对比，则在对比输出根目录下还会额外出现：
 
 - comparison_manifest.json：标准化 compare 入口的运行清单
 - comparison/comparison_summary.json：对比指标汇总
 - comparison/metric_plots/*.png：一指标一图的对比结果
+
+对于当前的 TE-CCL 实现，summary.json 与 teccl_solver_stats.json 中最需要优先区分的是以下几个时间字段：
+
+- completion_time_ms：runtime 执行结束时的完成时间，可视为通信执行阶段的完成时间基线
+- teccl_model_build_time_ms：时间展开 MILP 的建模耗时
+- teccl_solve_only_time_ms：HiGHS optimize 本身的耗时
+- teccl_solver_wall_time_ms：TE-CCL 从建模开始到求解结束的总墙钟耗时
+- teccl_communication_execution_time_ms：已求得计划在 runtime 中执行通信的耗时
+- teccl_end_to_end_time_ms：求解总耗时与通信执行耗时之和
+
+这组字段用于直接回答：TE-CCL 慢，是慢在求解还是慢在通信。
 
 ## 公平对比规则
 
@@ -173,4 +186,4 @@ CRUX 与 TE-CCL 做比较时，下面这些公共字段必须保持一致：
 允许变化的仅是算法私有参数，例如：
 
 - CRUX：max_priority_levels、candidate_path_limit、intensity_window_iterations
-- TE-CCL：epoch_size_ms、solver_backend、max_solver_time_ms
+- TE-CCL：epoch_size_ms、solver_backend、planning_horizon_epochs、max_solver_time_ms、mip_gap、solver_threads、objective_mode、switch_buffer_policy
