@@ -5,8 +5,6 @@
 - generated：用少量参数生成拓扑。
 - explicit：显式列出节点和链路。
 
-可参考模板：`topology.template.yaml`，可参考显式示例：`minimal_e2e_topology.yaml`。
-
 ## 基本结构
 
 ```yaml

@@ -2,7 +2,94 @@
 
 本目录存放统一工作负载输入。CRUX 与 TECCL 都读取同一种 workload 结构，不允许分别维护两套数据规模定义。
 
-可参考模板：`workload.template.yaml`，可参考最小示例：`minimal_e2e_workload.yaml`。
+本目录还提供了一个交互式生成脚本：`generate_workload.py`。
+
+它会先读取用户指定的 topology YAML，从 `nodes.explicit_nodes` 中提取所有 `node_type: gpu` 的 `node_id`，再生成 workload YAML。
+
+支持两种模式：
+
+1. 逐 job 交互生成。
+2. 按生产流量画像随机批量生成。
+
+## 生成脚本
+
+基本用法：
+
+```bash
+/home/code/miniconda3/envs/networkSimulation/bin/python configs/workload/generate_workload.py
+```
+
+脚本会交互询问：
+
+- topology YAML 路径
+- 输出 workload YAML 路径
+- meta.name / meta.version / meta.description
+- 生成模式
+- 模式 2 下的 job 模拟轮次
+- job 个数
+- 随机种子
+
+其中模式 1 会逐个 job 询问字段；模式 2 会先询问是单轮 job 模拟还是多轮 job 模拟，再按生产流量画像随机生成字段。
+
+也可以通过参数预填一部分输入：
+
+```bash
+/home/code/miniconda3/envs/networkSimulation/bin/python configs/workload/generate_workload.py \
+  --topology-file configs/topology/inter_dc_triple_fabric_topology.yaml \
+  --output-file configs/workload/generated_from_triple.yaml \
+  --mode 2 \
+  --simulation-round-mode 2 \
+  --job-count 20 \
+  --random-seed 42
+```
+
+### 模式 1：逐 job 交互生成
+
+每个 job 默认会询问以下字段，直接回车即可使用默认值：
+
+- job_id
+- arrival_time_ms
+- total_data_mb
+- chunk_count
+- compute_phase_ms
+- iteration_count
+- repeat_interval_ms
+- dependency_mode
+- participants
+- communication_pattern
+
+其中：
+
+- `participants` 支持逗号分隔手工输入。
+- 如果 `participants` 直接回车，脚本会从 topology 中提取到的 GPU 列表里随机抽取。
+- `communication_pattern` 当前固定四选一：`broadcast`、`all_reduce`、`all_gather`、`reduce_scatter`。
+
+### 模式 2：按生产流量画像随机生成
+
+模式 2 会按随机概率从四类典型流量画像中采样 job：
+
+- distributed_training_sync
+- fanout_parameter_distribution
+- state_collection
+- sharded_exchange
+
+每类画像会随机生成：
+
+- communication_pattern
+- participants 数量
+- total_data_mb
+- chunk_count
+- compute_phase_ms
+- arrival_time_ms
+- dependency_mode
+
+模式 2 在生成前会先确认 job 模拟轮次：
+
+- 单轮 job 模拟：所有 job 固定使用 `iteration_count: 1` 和 `repeat_interval_ms: 0`。
+- 多轮 job 模拟：会额外按画像随机生成 `iteration_count` 和 `repeat_interval_ms`。
+
+适合快速构造较接近生产场景分布的 workload 初稿，再手工微调。
+
 
 ## 基本结构
 

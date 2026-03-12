@@ -2,7 +2,6 @@
 
 本目录的实验配置用于运行单个仿真实验。它把 topology、workload、scheduler、simulation 和 metrics 串起来，是 `ExperimentRunner` 的直接输入。
 
-可参考模板：`experiment.template.yaml`，可参考示例：`inter_dc_dual_mild_broadcast_crux.yaml`、`inter_dc_dual_mild_broadcast_teccl.yaml`。
 
 ## 基本结构
 
