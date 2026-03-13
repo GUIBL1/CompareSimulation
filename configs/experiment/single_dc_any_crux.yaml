@@ -5,7 +5,7 @@ meta:
 
 inputs:
   topology_file: configs/topology/single_dc_topology.yaml
-  workload_file: configs/workload/inter_dc_parallel_full_duplex_heavy_workload.yaml
+  workload_file: configs/workload/generated_workload.yaml
 
 scheduler:
   type: crux

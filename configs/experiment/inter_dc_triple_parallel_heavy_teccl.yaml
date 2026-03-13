@@ -14,12 +14,12 @@ scheduler:
     candidate_path_limit: 24
     intensity_window_iterations: 3
   teccl:
-    epoch_size_ms: 1000
+    epoch_size_ms: 100
     solver_backend: highs
-    planning_horizon_epochs: 20
-    max_solver_time_ms: 15000
+    max_epoch_count: 30
+    max_solver_time_ms: 120000
     mip_gap: 0.05
-    solver_threads: 4
+    solver_threads: 10
     enforce_integrality: true
     objective_mode: weighted_early_completion
     switch_buffer_policy: zero
@@ -30,7 +30,7 @@ scheduler:
 
 simulation:
   time_unit: ms
-  max_time_ms: 20000
+  max_time_ms: 200000
   bandwidth_sharing_model: max_min_fair
   random_seed: 20260308
   repetitions: 1

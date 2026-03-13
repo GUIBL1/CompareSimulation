@@ -16,8 +16,8 @@ scheduler:
   teccl:
     epoch_size_ms: 5.0
     solver_backend: highs
-    planning_horizon_epochs: 48
-    max_solver_time_ms: 5000
+    max_epoch_count: 3000
+    max_solver_time_ms: 120000
     solver_threads: 4
     enforce_integrality: true
     objective_mode: weighted_early_completion
@@ -29,7 +29,7 @@ scheduler:
 
 simulation:
   time_unit: ms
-  max_time_ms: 200
+  max_time_ms: 200000
   bandwidth_sharing_model: max_min_fair
   random_seed: 20260307
   repetitions: 1
