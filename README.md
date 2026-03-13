@@ -15,6 +15,7 @@
 - 支持最小离散事件执行器、链路共享和结果导出
 - 支持按 paper/crux.md 重构后的 CRUX：GPU intensity、priority assignment、争用 DAG、优先级压缩与 priority-aware runtime
 - 支持按 paper/teccl.md 重构后的 TE-CCL 时间展开 MILP 主路径，正式求解后端为 HiGHS
+- 支持 TE-CCL 的 GPU 副本持久转发语义（GPU 发送不扣减副本占有，U 仅用于可发送性门控）
 - 支持最小端到端实验
 - 支持公平对比矩阵配置与枚举
 - 支持结果归因报告与交接报告生成
@@ -68,6 +69,20 @@ conda activate networkSimulation
 
 ```bash
 /home/code/miniconda3/envs/networkSimulation/bin/python
+```
+
+## Python 依赖版本清单
+
+项目根目录新增了依赖版本文件：
+
+- `requirement.txt`
+
+该文件记录了当前项目代码实际使用到的第三方 Python 包及其版本（基于 `networkSimulation` 环境扫描生成）。
+
+如需按该清单安装依赖，可执行：
+
+```bash
+/home/code/miniconda3/envs/networkSimulation/bin/python -m pip install -r requirement.txt
 ```
 
 ## 快速开始
@@ -201,4 +216,4 @@ CRUX 与 TE-CCL 做比较时，下面这些公共字段必须保持一致：
 允许变化的仅是算法私有参数，例如：
 
 - CRUX：hardware_priority_count、candidate_path_limit、topological_order_sample_count、intensity_definition_mode、priority_factor_mode、enable_priority_aware_bandwidth
-- TE-CCL：epoch_size_ms、solver_backend、planning_horizon_epochs、max_solver_time_ms、mip_gap、solver_threads、objective_mode、switch_buffer_policy
+- TE-CCL：epoch_size_ms、solver_backend、max_epoch_count（兼容 planning_horizon_epochs）、max_solver_time_ms、mip_gap、solver_threads、objective_mode、switch_buffer_policy

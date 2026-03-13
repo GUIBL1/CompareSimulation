@@ -71,6 +71,8 @@
 5. 推进到下一个“调度时刻、流完成时刻或 max_time_ms”。
 6. 更新 flow、link、job 的完成状态。
 
+补充：当前 runtime 仍以 `max_min_fair` 为底层共享模型；当调度器是 CRUX 且开启 `enable_priority_aware_bandwidth` 时，会先按优先级分组，再在组内执行 max-min fair 并逐级消耗链路剩余带宽。TE-CCL 路径回放不走该优先级分组逻辑。
+
 这意味着系统里真正被传输的是 flow，但这些 flow 的来源有两种：
 
 1. CRUX：直接把 job/chunk 的端到端传输物化成 flow。
@@ -154,6 +156,7 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 3. GPU 可以复制并保留已接收 chunk。
 4. 交换机遵循非复制、零持久 buffer 语义。
 5. 目标函数优先奖励更早完成的接收量。
+6. GPU 发送不消耗副本占有：GPU buffer 递推不减发送量，发送由代表变量 U 门控。
 
 ### 4.2 当前 TE-CCL 的建模对象
 
@@ -163,7 +166,14 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 2. 需求矩阵 $D_{s,d,c}$。
 3. 流量变量 $F_{s,i,j,k,c}$。
 4. 缓冲变量 $B_{s,n,k,c}$。
-5. 接收变量 $R_{s,d,k,c}$。
+5. GPU 代表发送变量 $U_{s,n,k,c}$（用于近似论文中的 GPU 端 max 发送约束）。
+6. 接收变量 $R_{s,d,k,c}$。
+
+其中当前实现对应的关键关系可概括为：
+
+1. GPU 发送门控：$F \le U$，且 $U \le B$。
+2. GPU buffer 递推：$B_k = B_{k-1} + Init_k + Arrive_k$（不减 U）。
+3. 交换机零缓冲与流守恒：$B=0$ 且入流=出流。
 
 求解器不再按当前 runtime 状态逐 epoch 重新做局部候选动作选择，而是先构建完整 MILP，再一次性求出全局计划。
 
@@ -181,6 +191,8 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 6. `enforce_integrality`
 7. `objective_mode`
 8. `switch_buffer_policy`
+
+补充：当前推荐优先使用 `max_epoch_count` 作为规划 epoch 上限；`planning_horizon_epochs` 仍保留兼容，二者择一生效（优先 `max_epoch_count`）。
 
 旧的 `small_scale_debug_solver`、`heuristic_solver` 和 `exact_milp_solver` 不再作为正式对比实验的主后端口径。
 
