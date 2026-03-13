@@ -129,8 +129,8 @@ def _default_teccl_scheduler_block(overrides: dict[str, Any] | None) -> dict[str
     block = {
         "epoch_size_ms": 1.0,
         "solver_backend": "highs",
-        "max_solver_time_ms": 5000,
-        "planning_horizon_epochs": 32,
+        "max_solver_time_ms": 120000,
+        "max_epoch_count": 32,
         "solver_threads": 4,
         "enforce_integrality": True,
         "objective_mode": "weighted_early_completion",

@@ -45,7 +45,8 @@ def run_teccl_planning_export(
 	if epoch_size_ms <= 0:
 		raise ValueError("scheduler.teccl.epoch_size_ms must be positive")
 	planning_horizon_epochs = int(
-		strategy.get("planning_horizon_epochs")
+		strategy.get("max_epoch_count")
+		or strategy.get("planning_horizon_epochs")
 		or infer_planning_horizon_epochs(
 			jobs=jobs,
 			topology=topology,
@@ -59,7 +60,7 @@ def run_teccl_planning_export(
 		switch_buffer_policy=str(strategy.get("switch_buffer_policy", "zero")),
 	)
 	solve_config = TECCLHighsSolveConfig(
-		max_solver_time_ms=int(strategy.get("max_solver_time_ms", 0) or 0) or None,
+		max_solver_time_ms=int(strategy.get("max_solver_time_ms", 120000) or 120000),
 		mip_gap=float(strategy.get("mip_gap")) if strategy.get("mip_gap") is not None else None,
 		solver_threads=int(strategy.get("solver_threads", 0) or 0) or None,
 		log_to_console=bool(strategy.get("solver_log_to_console", False)),
@@ -77,6 +78,8 @@ def run_teccl_planning_export(
 	build_result = build_teccl_milp_model(model_input=model_input, config=build_config)
 	model_build_time_ms = (perf_counter() - build_start) * 1000.0
 	solve_result = solve_teccl_milp(build_result=build_result, config=solve_config)
+	if not solve_result.has_usable_solution:
+		raise ValueError(f"HiGHS planner did not produce an executable TE-CCL plan: {solve_result.model_status}")
 	total_wall_time_ms = (perf_counter() - wall_start) * 1000.0
 
 	solver_stats = build_teccl_solver_stats(

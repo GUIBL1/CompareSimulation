@@ -20,6 +20,7 @@ class TECCLSolverStats:
 	topology_name: str
 	solver_backend: str
 	epoch_size_ms: float
+	max_epoch_count: int
 	planning_horizon_epochs: int
 	planning_horizon_ms: float
 	teccl_model_build_time_ms: float
@@ -74,6 +75,7 @@ def build_teccl_solver_stats(
 		topology_name=model_input.topology_name,
 		solver_backend=solver_backend,
 		epoch_size_ms=model_input.epoch_size_ms,
+		max_epoch_count=model_input.planning_horizon_epochs,
 		planning_horizon_epochs=model_input.planning_horizon_epochs,
 		planning_horizon_ms=model_input.planning_horizon_ms,
 		teccl_model_build_time_ms=model_build_time_ms,
@@ -104,6 +106,7 @@ def build_teccl_solver_stats(
 		mip_gap=solve_result.mip_gap,
 		node_explored_count=int(solve_result.summary.get("mip_node_count", 0) or 0),
 		metadata={
+			"has_usable_solution": solve_result.has_usable_solution,
 			"gpu_node_count": len(model_input.index_bundle.node_partition.gpu_nodes),
 			"switch_node_count": len(model_input.index_bundle.node_partition.switch_nodes),
 			"relay_node_count": len(model_input.index_bundle.node_partition.relay_nodes),

@@ -29,6 +29,7 @@ class TECCLHighsSolveConfig:
 @dataclass(slots=True)
 class TECCLHighsSolveResult:
 	model_status: str
+	has_usable_solution: bool
 	objective_value: float | None
 	best_bound: float | None
 	mip_gap: float | None
@@ -61,6 +62,7 @@ def solve_teccl_milp(
 	objective_value = _safe_float(model.getObjectiveValue())
 	best_bound = _safe_float(getattr(info, "mip_dual_bound", None))
 	mip_gap = _safe_float(getattr(info, "mip_gap", None))
+	has_usable_solution = _has_usable_solution(status=status, objective_value=objective_value)
 
 	flow_values: dict[tuple[str, str, int], float] = {}
 	buffer_values: dict[tuple[str, str, int], float] = {}
@@ -81,6 +83,7 @@ def solve_teccl_milp(
 
 	summary = {
 		"model_status": status,
+		"has_usable_solution": has_usable_solution,
 		"objective_value": objective_value,
 		"best_bound": best_bound,
 		"mip_gap": mip_gap,
@@ -94,6 +97,7 @@ def solve_teccl_milp(
 	}
 	return TECCLHighsSolveResult(
 		model_status=status,
+		has_usable_solution=has_usable_solution,
 		objective_value=objective_value,
 		best_bound=best_bound,
 		mip_gap=mip_gap,
@@ -124,3 +128,12 @@ def _safe_float(value: object) -> float | None:
 	if isinstance(value, int | float):
 		return float(value) if isfinite(float(value)) else None
 	return None
+
+
+def _has_usable_solution(status: str, objective_value: float | None) -> bool:
+	if status in {"Optimal", "Feasible"}:
+		return True
+	if objective_value is None:
+		return False
+	status_lower = status.lower()
+	return "time limit" in status_lower or "solution limit" in status_lower

@@ -48,6 +48,7 @@ class ExperimentRunner:
         runtime = RuntimeState(now_ms=0.0, topology=topology, active_jobs=jobs)
         runtime.metadata["experiment_name"] = experiment.meta.name
         runtime.metadata["scheduler_type"] = experiment.scheduler.type
+        runtime.metadata["simulation_max_time_ms"] = experiment.simulation.max_time_ms
         scheduler = self._create_scheduler(experiment.scheduler)
         for job in jobs:
             scheduler.on_workload_arrival(job, runtime)

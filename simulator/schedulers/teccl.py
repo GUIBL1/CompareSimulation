@@ -56,7 +56,8 @@ class TECCLJobState:
 class TECCLStrategy:
     epoch_size_ms: float = 1.0
     solver_backend: str = "small_scale_debug_solver"
-    max_solver_time_ms: int = 1000
+    max_solver_time_ms: int = 120000
+    max_epoch_count: int | None = None
     planning_horizon_epochs: int | None = None
     mip_gap: float | None = None
     solver_threads: int | None = None
@@ -155,6 +156,7 @@ class TECCLScheduler(Scheduler):
             "strategy": {
                 "epoch_size_ms": self.strategy.epoch_size_ms,
                 "solver_backend": self.strategy.solver_backend,
+                "max_epoch_count": self.strategy.max_epoch_count,
                 "planning_horizon_epochs": self.strategy.planning_horizon_epochs,
                 "mip_gap": self.strategy.mip_gap,
                 "solver_threads": self.strategy.solver_threads,
@@ -193,12 +195,13 @@ class TECCLScheduler(Scheduler):
         return decision
 
     def _build_planned_execution(self, runtime_state: RuntimeState) -> None:
-        planning_horizon_epochs = self.strategy.planning_horizon_epochs
+        planning_horizon_epochs = self.strategy.max_epoch_count or self.strategy.planning_horizon_epochs
         if planning_horizon_epochs is None:
             planning_horizon_epochs = infer_planning_horizon_epochs(
                 jobs=runtime_state.active_jobs,
                 topology=runtime_state.topology,
                 epoch_size_ms=self.strategy.epoch_size_ms,
+                max_time_ms=float(runtime_state.metadata.get("simulation_max_time_ms", 0.0) or 0.0),
             )
 
         wall_start = perf_counter()
@@ -228,7 +231,7 @@ class TECCLScheduler(Scheduler):
                 extract_all_variable_values=self.strategy.extract_all_variable_values,
             ),
         )
-        if solve_result.model_status not in {"Optimal", "Feasible"}:
+        if not solve_result.has_usable_solution:
             raise ValueError(f"HiGHS planner did not produce an executable TE-CCL plan: {solve_result.model_status}")
         total_wall_time_ms = (perf_counter() - wall_start) * 1000.0
         self.planned_execution = decode_teccl_solution(build_result, solve_result)
@@ -247,6 +250,7 @@ class TECCLScheduler(Scheduler):
         self.last_solver_report = {
             "planner": {
                 "status": solve_result.model_status,
+                "has_usable_solution": solve_result.has_usable_solution,
                 "objective_value": solve_result.objective_value,
                 "planned_transfer_count": len(self.planned_execution.all_transfers),
                 "planned_epoch_count": len(self.planned_execution.transfers_by_epoch),

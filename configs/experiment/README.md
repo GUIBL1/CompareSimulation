@@ -24,7 +24,7 @@ scheduler:
   teccl:
     epoch_size_ms: 1
     solver_backend: highs
-    planning_horizon_epochs: 32
+    max_epoch_count: 32
     max_solver_time_ms: 5000
     solver_threads: 4
     enforce_integrality: true
@@ -87,8 +87,8 @@ metrics:
 
 - `epoch_size_ms`：必填。一个 epoch 的时长，单位毫秒。
 - `solver_backend`：必填。当前正式后端使用 `highs`。
-- `planning_horizon_epochs`：建议显式填写。时间展开规划窗口的 epoch 数。
-- `max_solver_time_ms`：求解器时间预算。
+- `max_epoch_count`：建议显式填写。MILP 时间展开的最大 epoch 数。
+- `max_solver_time_ms`：MILP 求解器时间预算（毫秒）。若未显式提供，调度器默认 120000（2 分钟）。
 - `mip_gap`：可选。HiGHS 的 MIP gap 目标。
 - `solver_threads`：可选。HiGHS 线程数。
 - `enforce_integrality`：是否保持整数建模。
@@ -137,7 +137,7 @@ scheduler:
   teccl:
     epoch_size_ms: 1
     solver_backend: highs
-    planning_horizon_epochs: 32
+    max_epoch_count: 32
     max_solver_time_ms: 5000
     solver_threads: 4
     enforce_integrality: true
@@ -157,15 +157,15 @@ scheduler:
 
 - 公平对比时，CRUX 与 TECCL 两个 experiment 只应在 `scheduler` 参数上不同。
 - `metrics.output_dir` 不要复用同一目录，避免结果相互覆盖。
-- 当前正式实验建议直接使用 `solver_backend: highs`，并显式控制 `planning_horizon_epochs` 与 `max_solver_time_ms`。
+- 当前正式实验建议直接使用 `solver_backend: highs`，并显式控制 `max_epoch_count` 与 `max_solver_time_ms`。
 - 当前正式 CRUX 实验建议显式填写 `hardware_priority_count`、`topological_order_sample_count`、`intensity_definition_mode`、`priority_factor_mode` 与 `enable_priority_aware_bandwidth`，不要只依赖旧版默认值。
-- 如果 TE-CCL 运行时间过长，优先检查 `planning_horizon_epochs`、chunk 数、目的地对数量、拓扑边数和 `mip_gap` 设置，而不是先怀疑 runtime 通信执行。
+- 如果 TE-CCL 运行时间过长，优先检查 `max_epoch_count`、chunk 数、目的地对数量、拓扑边数和 `mip_gap` 设置，而不是先怀疑 runtime 通信执行。
 - 如果只想跑 1 次最小复现，把 `repetitions` 设为 `1`，并把 `max_time_ms` 控制在较小范围。
 
 ## 常见错误
 
 - `scheduler.type=teccl` 但漏写 `scheduler.teccl.epoch_size_ms` 或 `solver_backend`。
-- `scheduler.type=teccl` 但没有显式限制 `planning_horizon_epochs`，导致时间展开 MILP 模型规模过大。
+- `scheduler.type=teccl` 但没有显式限制 `max_epoch_count`，导致时间展开 MILP 模型规模过大。
 - `scheduler.type=crux` 但同时漏写 `scheduler.crux.max_priority_levels` 和 `scheduler.crux.hardware_priority_count`。
 - `scheduler.type=crux` 但没有开启 `enable_priority_aware_bandwidth`，导致 priority 数值导出存在而运行时行为仍接近纯公平共享。
 - `output_dir` 为空。
