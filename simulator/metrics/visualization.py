@@ -203,16 +203,22 @@ def _metric_specs() -> list[dict[str, str]]:
 
 
 def _configure_plot_fonts() -> None:
-    available_fonts = {font_manager.FontProperties(fname=path).get_name() for path in font_manager.findSystemFonts()}
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["axes.unicode_minus"] = False
+
+    try:
+        # Reuse Matplotlib's cached font metadata so we do not have to open every
+        # system font file again; some hosts contain unreadable/broken font files.
+        available_fonts = {font.name for font in font_manager.fontManager.ttflist if getattr(font, "name", None)}
+    except Exception:
+        available_fonts = set()
+
     for font_name in PREFERRED_CJK_FONTS:
         if font_name in available_fonts:
-            plt.rcParams["font.family"] = "sans-serif"
             plt.rcParams["font.sans-serif"] = [font_name, "DejaVu Sans", "Liberation Sans"]
-            plt.rcParams["axes.unicode_minus"] = False
             return
-    plt.rcParams["font.family"] = "sans-serif"
+
     plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Liberation Sans"]
-    plt.rcParams["axes.unicode_minus"] = False
 
 
 def _cleanup_legacy_outputs(output_path: Path) -> None:
