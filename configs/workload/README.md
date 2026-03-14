@@ -31,6 +31,11 @@
 
 其中模式 1 会逐个 job 询问字段；模式 2 会先询问是单轮 job 模拟还是多轮 job 模拟，再按生产流量画像随机生成字段。
 
+> 当前脚本遵循以下拓扑约束：
+>
+> - 集合通信（`broadcast`、`all_reduce`、`all_gather`、`reduce_scatter`）仅允许发生在单个 DC 内。
+> - 跨 DC 通信仅允许 `point_to_point`，且 participants 必须是来自不同 DC 的两个 GPU。
+
 也可以通过参数预填一部分输入：
 
 ```bash
@@ -48,6 +53,7 @@
 每个 job 默认会询问以下字段，直接回车即可使用默认值：
 
 - job_id
+- 是否跨域（仅多 DC 拓扑会询问）
 - arrival_time_ms
 - total_data_mb
 - chunk_count
@@ -56,13 +62,12 @@
 - repeat_interval_ms
 - dependency_mode
 - participants
-- communication_pattern
 
 其中：
 
-- `participants` 支持逗号分隔手工输入。
-- 如果 `participants` 直接回车，脚本会从 topology 中提取到的 GPU 列表里随机抽取。
-- `communication_pattern` 当前固定四选一：`broadcast`、`all_reduce`、`all_gather`、`reduce_scatter`。
+- 如果选择“跨域”，`communication_pattern` 自动固定为 `point_to_point`，participants 必须是来自不同 DC 的两个 GPU。
+- 如果选择“非跨域”，`communication_pattern` 才会交互选择（四选一：`broadcast`、`all_reduce`、`all_gather`、`reduce_scatter`），participants 必须都在同一个 DC。
+- `participants` 支持逗号分隔手工输入；直接回车时会按上述约束自动随机抽取。
 
 ### 模式 2：按生产流量画像随机生成
 
@@ -82,6 +87,14 @@
 - compute_phase_ms
 - arrival_time_ms
 - dependency_mode
+
+模式 2 的 DC 相关行为：
+
+- 单 DC 拓扑：全部为单 DC 集合通信（四类画像对应的 collective）。
+- 多 DC 拓扑：默认生成“混合流量”——同时包含
+  - 单 DC 集合通信（来自四类画像），以及
+  - 跨 DC `point_to_point` 通信。
+- 多 DC 拓扑下跨 DC 流量占比默认按常量 `MULTI_DC_CROSS_DC_TRAFFIC_RATIO=0.25` 采样，并且保证跨 DC job 数量至少为 1（即跨域流量不会为 0）。
 
 模式 2 在生成前会先确认 job 模拟轮次：
 
@@ -130,8 +143,8 @@ jobs:
 
 - `job_id`：作业唯一标识，必填。
 - `arrival_time_ms`：作业到达时间，单位毫秒，必须大于等于 0。
-- `participants`：参与该 collective 的 GPU 列表，必填且不能为空。
-- `communication_pattern`：通信模式，必填，例如 `broadcast`、`all_reduce`。
+- `participants`：参与通信的 GPU 列表，必填且不能为空。
+- `communication_pattern`：通信模式，必填，例如 `broadcast`、`all_reduce`、`point_to_point`。
 - `total_data_mb`：总数据量，单位 MB，必须大于 0。
 - `chunk_count`：切分块数，必须大于 0。
 - `compute_phase_ms`：计算阶段耗时，单位毫秒，必须大于等于 0。
@@ -147,12 +160,18 @@ jobs:
 
 ### communication_pattern
 
-当前建议使用能明确映射到 collective 语义的名称，例如：
+当前脚本支持以下通信模式：
 
 - `broadcast`
 - `all_reduce`
 - `all_gather`
 - `reduce_scatter`
+- `point_to_point`
+
+约束规则：
+
+- 前四种为集合通信，只能在单 DC 内使用。
+- `point_to_point` 用于跨 DC 通信（participants 必须恰好两个且分属不同 DC）。
 
 如果新增模式，应先确认统一 workload 解析层和两个调度器都能理解该模式。
 
