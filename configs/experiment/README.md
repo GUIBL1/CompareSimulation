@@ -153,6 +153,37 @@ scheduler:
 
 单实验一般通过 Python 调用 `ExperimentRunner`，或被更上层脚本间接调用。对于公平矩阵批处理，不建议手写很多 experiment YAML，优先使用 `scripts/run_fair_matrix.py` 自动物化到 `configs/experiment/generated/`。
 
+## TECCL 可行性扫描脚本
+
+本目录提供交互式脚本 `scan_teccl_feasibility.py`，用于扫描 TECCL 参数可行性，并输出“最小可行时域 + 对应规模”。
+
+运行方式：
+
+```bash
+/home/inspur-02/.conda/envs/networkSimulation/bin/python configs/experiment/scan_teccl_feasibility.py
+```
+
+脚本会按顺序交互询问：
+
+1. 实验文件路径（必填）。
+2. `epoch_size_ms` 候选值（逗号分隔；回车默认 `[15,20,25,50,100,200,500,1000]`）。
+3. `max_epoch_count` 候选值（逗号分隔；回车默认 `[10,20,30,40,50,60,70,80,90,100]`）。
+4. `max_solver_time_ms`（回车默认实验文件配置）。
+5. `mip_gap`（回车默认实验文件配置）。
+6. `solver_threads`（回车默认实验文件配置）。
+7. 是否输出为文件（`y/n`）：
+   - 选 `y`：继续输入输出文件路径，结果写入 JSON 文件；
+   - 选 `n`：直接在终端打印完整 JSON 结果。
+
+扫描逻辑：
+
+- 对每个 `epoch_size_ms`，遍历所有 `max_epoch_count` 组合逐一验证。
+- 其余参数默认沿用实验配置。
+- 输出包含每个组合的可行性状态（`model_status`/`feasible`）和规模指标（变量数、约束数、非零元、commodity 数、destination pair 数等）。
+- 汇总结果中包含：
+  - 全局最小可行参数组合（按 `planning_horizon_ms` 最小优先）；
+  - 每个 `epoch_size_ms` 下最小可行的 `max_epoch_count`。
+
 ## 书写建议
 
 - 公平对比时，CRUX 与 TECCL 两个 experiment 只应在 `scheduler` 参数上不同。
