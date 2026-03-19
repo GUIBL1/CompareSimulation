@@ -62,24 +62,25 @@ class CruxScheduler(Scheduler):
         self._refresh_observed_comm_time(runtime_state)
         model_input = self._build_model_input(runtime_state)
         path_selection_started_at = perf_counter()
-        provisional_link_loads: dict[str, int] = defaultdict(int)
-        ranked_jobs = sorted(
+        selected_path_ids_by_flow, selected_paths_by_flow, selected_transfer_time_ms_by_flow = self._run_path_selection_round(
+            runtime_state=runtime_state,
+            model_input=model_input,
+            ranked_jobs=sorted(
+                runtime_state.active_jobs,
+                key=lambda job: (-self._intensity_score(job, model_input), job.arrival_time_ms, job.job_id),
+            ),
+        )
+        model_input.apply_selected_paths(selected_path_ids_by_flow, selected_transfer_time_ms_by_flow)
+
+        reranked_jobs = sorted(
             runtime_state.active_jobs,
             key=lambda job: (-self._intensity_score(job, model_input), job.arrival_time_ms, job.job_id),
         )
-        selected_path_ids_by_flow: dict[str, str] = {}
-        selected_paths_by_flow: dict[str, list[str]] = {}
-        selected_transfer_time_ms_by_flow: dict[str, float] = {}
-        for job in ranked_jobs:
-            for flow_id, path_id, path, transfer_time_ms in self._select_stage2_paths_for_job(
-                job,
-                runtime_state,
-                model_input,
-                provisional_link_loads,
-            ):
-                selected_path_ids_by_flow[flow_id] = path_id
-                selected_paths_by_flow[flow_id] = path
-                selected_transfer_time_ms_by_flow[flow_id] = transfer_time_ms
+        selected_path_ids_by_flow, selected_paths_by_flow, selected_transfer_time_ms_by_flow = self._run_path_selection_round(
+            runtime_state=runtime_state,
+            model_input=model_input,
+            ranked_jobs=reranked_jobs,
+        )
         model_input.apply_selected_paths(selected_path_ids_by_flow, selected_transfer_time_ms_by_flow)
         self.last_path_selection_time_ms = (perf_counter() - path_selection_started_at) * 1000.0
 
@@ -134,6 +135,81 @@ class CruxScheduler(Scheduler):
         self.last_priority_compression_result = compression_result.to_debug_dict()
         self.last_scheduler_wall_time_ms = (perf_counter() - started_at) * 1000.0
         return decision
+
+    def _run_path_selection_round(
+        self,
+        runtime_state: RuntimeState,
+        model_input: CruxModelInput,
+        ranked_jobs: list[UnifiedJob],
+    ) -> tuple[dict[str, str], dict[str, list[str]], dict[str, float]]:
+        provisional_link_loads: dict[str, int] = defaultdict(int)
+        selected_path_ids_by_flow: dict[str, str] = {}
+        selected_paths_by_flow: dict[str, list[str]] = {}
+        selected_transfer_time_ms_by_flow: dict[str, float] = {}
+        for job in ranked_jobs:
+            for flow_id, path_id, path, transfer_time_ms in self._select_stage2_paths_for_job(
+                job,
+                runtime_state,
+                model_input,
+                provisional_link_loads,
+            ):
+                selected_path_ids_by_flow[flow_id] = path_id
+                selected_paths_by_flow[flow_id] = path
+                selected_transfer_time_ms_by_flow[flow_id] = transfer_time_ms
+        selected_transfer_time_ms_by_flow = self._recompute_selected_transfer_times(
+            runtime_state=runtime_state,
+            model_input=model_input,
+            selected_path_ids_by_flow=selected_path_ids_by_flow,
+            fallback_selected_transfer_time_ms_by_flow=selected_transfer_time_ms_by_flow,
+        )
+        return selected_path_ids_by_flow, selected_paths_by_flow, selected_transfer_time_ms_by_flow
+
+    def _recompute_selected_transfer_times(
+        self,
+        runtime_state: RuntimeState,
+        model_input: CruxModelInput,
+        selected_path_ids_by_flow: dict[str, str],
+        fallback_selected_transfer_time_ms_by_flow: dict[str, float],
+    ) -> dict[str, float]:
+        selected_flow_count_by_link: dict[str, int] = defaultdict(int)
+        for flow_id, path_id in selected_path_ids_by_flow.items():
+            path_input = model_input.path_by_id.get(path_id)
+            if path_input is None:
+                continue
+            for link_id in path_input.load.link_ids:
+                selected_flow_count_by_link[link_id] += 1
+
+        recomputed: dict[str, float] = {}
+        for flow_id, path_id in selected_path_ids_by_flow.items():
+            path_input = model_input.path_by_id.get(path_id)
+            flow_input = model_input.flow_by_id.get(flow_id)
+            if path_input is None or flow_input is None:
+                continue
+
+            bottleneck_bandwidth_gbps: float | None = None
+            total_latency_ms = 0.0
+            for link_id in path_input.load.link_ids:
+                link_state = runtime_state.link_states.get(link_id)
+                if link_state is None:
+                    bottleneck_bandwidth_gbps = None
+                    break
+                selected_count = max(1, selected_flow_count_by_link.get(link_id, 1))
+                share_bandwidth_gbps = link_state.bandwidth_gbps / selected_count if selected_count > 0 else 0.0
+                bottleneck_bandwidth_gbps = (
+                    share_bandwidth_gbps
+                    if bottleneck_bandwidth_gbps is None
+                    else min(bottleneck_bandwidth_gbps, share_bandwidth_gbps)
+                )
+                total_latency_ms += link_state.latency_us / 1000.0
+
+            transfer_time_ms = fallback_selected_transfer_time_ms_by_flow.get(
+                flow_id,
+                path_input.load.estimated_transfer_time_ms,
+            )
+            if bottleneck_bandwidth_gbps is not None and bottleneck_bandwidth_gbps > 1e-12:
+                transfer_time_ms = (flow_input.total_size_mb / (bottleneck_bandwidth_gbps * 0.125)) + total_latency_ms
+            recomputed[flow_id] = transfer_time_ms
+        return recomputed
 
     def export_debug_state(self) -> dict[str, object]:
         return {
