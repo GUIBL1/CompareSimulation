@@ -102,27 +102,28 @@ conda activate networkSimulation
 
 它会自动完成以下步骤：
 
-- 读取两份 experiment 配置
-- 分别运行 experiment-a 和 experiment-b
-- 将两边原始结果写到同一个输出根目录下的 run_a 和 run_b
-- 自动生成 comparison_summary.json 和一指标一图的 comparison/metric_plots
+- 读取三份 experiment 配置
+- 分别运行 experiment-a、experiment-b 和 experiment-c（通常分别对应 CRUX / TE-CCL / ECMP）
+- 将三边原始结果写到同一个输出根目录下的 run_a、run_b 和 run_c
+- 自动生成 comparison_summary.json（三方同屏）和一指标一图的 comparison/metric_plots
 - 写出 comparison_manifest.json，记录输入配置、显示标签和输出位置
 
 基本命令格式：
 
 ```bash
 conda activate networkSimulation
-./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <output-dir>
+./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <experiment-c.yaml> <output-dir>
 ```
 
-例如，对比 triple 拓扑下的 CRUX 与 TE-CCL：
+例如，对比 triple 拓扑下的 CRUX、TE-CCL 与 ECMP baseline：
 
 ```bash
 conda activate networkSimulation
 ./run_experiment_compare.sh \
     configs/experiment/inter_dc_triple_parallel_crux.yaml \
     configs/experiment/inter_dc_triple_parallel_teccl.yaml \
-    results/inter_dc_triple_parallel_crux_vs_teccl \
+    configs/experiment/inter_dc_triple_parallel_ecmp.yaml \
+    results/inter_dc_triple_parallel_crux_vs_teccl_vs_ecmp \
 ```
 输出目录结构通常如下：
 
@@ -131,6 +132,7 @@ results/<your-compare-dir>/
 ├── comparison_manifest.json
 ├── run_a/
 ├── run_b/
+├── run_c/
 └── comparison/
     ├── comparison_summary.json
     └── metric_plots/
@@ -152,8 +154,9 @@ results/<your-compare-dir>/
 - comparison/metric_plots/*.png
 - run_a/summary.json
 - run_b/summary.json
+- run_c/summary.json
 
-comparison_summary.json 中会同时写出每个指标的 display_name、chart_type，以及左右两侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
+comparison_summary.json 中会写出每个指标的 display_name、chart_type，以及 participants 三侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
 
 
 ## 结果文件说明

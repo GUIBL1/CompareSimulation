@@ -113,6 +113,92 @@ def generate_crux_teccl_comparison_visuals(
     )
 
 
+def generate_experiment_three_way_comparison_visuals(
+    result_a_dir: str | Path,
+    result_b_dir: str | Path,
+    result_c_dir: str | Path,
+    output_dir: str | Path,
+    label_a: str | None = None,
+    label_b: str | None = None,
+    label_c: str | None = None,
+    title: str = "Experiment Comparison",
+) -> dict[str, Any]:
+    return generate_experiment_multi_comparison_visuals(
+        result_dirs=[result_a_dir, result_b_dir, result_c_dir],
+        output_dir=output_dir,
+        labels=[label_a, label_b, label_c],
+        title=title,
+    )
+
+
+def generate_experiment_multi_comparison_visuals(
+    result_dirs: list[str | Path],
+    output_dir: str | Path,
+    labels: list[str | None] | None = None,
+    title: str = "Experiment Comparison",
+) -> dict[str, Any]:
+    resolved_dirs = [Path(path).resolve() for path in result_dirs]
+    if len(resolved_dirs) < 2:
+        raise ValueError("At least two result directories are required for comparison visuals")
+
+    output_path = Path(output_dir).resolve()
+    output_path.mkdir(parents=True, exist_ok=True)
+    _cleanup_legacy_outputs(output_path)
+
+    labels = labels or [None] * len(resolved_dirs)
+    if len(labels) != len(resolved_dirs):
+        raise ValueError("labels length must match result_dirs length")
+
+    participants: list[dict[str, Any]] = []
+    for index, result_dir in enumerate(resolved_dirs):
+        summary = _load_json(result_dir / "summary.json")
+        trace = _load_csv(result_dir / "link_load_trace.csv")
+        flow = _load_csv(result_dir / "flow_trace.csv")
+        participant_label = labels[index] or str(summary.get("experiment_name", result_dir.name))
+        participants.append(
+            {
+                "label": participant_label,
+                "summary": summary,
+                "metrics": _compute_comparison_metrics(summary, trace, flow),
+            }
+        )
+
+    plot_dir = output_path / "metric_plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    plot_outputs: dict[str, str] = {}
+    for spec in _metric_specs():
+        plot_path = plot_dir / f"{spec['id']}.png"
+        _render_metric_plot_multi(
+            spec=spec,
+            participants=participants,
+            output_path=plot_path,
+            title=title,
+        )
+        plot_outputs[spec["id"]] = str(plot_path)
+
+    comparison_summary = _build_multi_comparison_summary(participants=participants, title=title)
+    summary_json = output_path / "comparison_summary.json"
+    summary_json.write_text(json.dumps(comparison_summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return {
+        "summary_json": str(summary_json),
+        "metric_plots": plot_outputs,
+        "scalar_metric_plots": plot_outputs,
+        "schedule_metric_plots": {},
+        "removed_default_metrics": [
+            "epoch_action_count",
+            "schedule_invocation_count",
+            "total_flow_count",
+            "completed_flow_count",
+            "total_transmitted_mb",
+            "path_assignment_count",
+            "priority_assignment_count",
+            "active_link_count",
+            "total_job_count",
+        ],
+    }
+
+
 def _metric_specs() -> list[dict[str, str]]:
     return [
         {
@@ -282,6 +368,48 @@ def _build_comparison_summary(
     }
 
 
+def _build_multi_comparison_summary(participants: list[dict[str, Any]], title: str) -> dict[str, Any]:
+    metric_entries: list[dict[str, Any]] = []
+    for spec in _metric_specs():
+        metric_entries.append(
+            {
+                "id": spec["id"],
+                "display_name": spec["display_name"],
+                "chart_type": spec["chart_type"],
+                "values": [
+                    {
+                        "label": participant["label"],
+                        "value": _summary_value(participant["metrics"], spec),
+                    }
+                    for participant in participants
+                ],
+            }
+        )
+    return {
+        "title": title,
+        "participants": [
+            {
+                "label": participant["label"],
+                "experiment_name": participant["summary"].get("experiment_name", participant["label"]),
+                "scheduler_type": participant["summary"].get("scheduler_type", "unknown"),
+            }
+            for participant in participants
+        ],
+        "metrics": metric_entries,
+        "removed_default_metrics": [
+            "epoch_action_count",
+            "schedule_invocation_count",
+            "total_flow_count",
+            "completed_flow_count",
+            "total_transmitted_mb",
+            "path_assignment_count",
+            "priority_assignment_count",
+            "active_link_count",
+            "total_job_count",
+        ],
+    }
+
+
 def _summary_value(metrics: dict[str, Any], spec: dict[str, str]) -> Any:
     if spec["chart_type"] == "stacked_bar":
         return {
@@ -363,6 +491,60 @@ def _render_metric_plot(
             percentiles_b=metrics_b.get(spec["id"], {}),
             label_a=label_a,
             label_b=label_b,
+            axis_label=spec["axis_label"],
+            output_path=output_path,
+            title=title,
+        )
+        return
+    raise ValueError(f"Unsupported chart type: {chart_type}")
+
+
+def _render_metric_plot_multi(
+    spec: dict[str, str],
+    participants: list[dict[str, Any]],
+    output_path: Path,
+    title: str,
+) -> None:
+    chart_type = spec["chart_type"]
+    labels = [participant["label"] for participant in participants]
+    metrics = [participant["metrics"] for participant in participants]
+
+    if chart_type == "stacked_bar":
+        _plot_stacked_completion_metric_multi(
+            metric_name=spec["display_name"],
+            labels=labels,
+            metrics=metrics,
+            axis_label=spec["axis_label"],
+            output_path=output_path,
+            title=title,
+        )
+        return
+    if chart_type == "bar":
+        _plot_bar_metric_multi(
+            metric_name=spec["display_name"],
+            labels=labels,
+            values=[float(metric.get(spec["value_key"], 0.0) or 0.0) for metric in metrics],
+            axis_label=spec["axis_label"],
+            output_path=output_path,
+            title=title,
+        )
+        return
+    if chart_type == "grouped_bar":
+        _plot_grouped_bar_metric_multi(
+            metric_name=spec["display_name"],
+            labels=labels,
+            percentile_dicts=[metric.get(spec["value_key"], {}) for metric in metrics],
+            axis_label=spec["axis_label"],
+            output_path=output_path,
+            title=title,
+        )
+        return
+    if chart_type == "ecdf":
+        _plot_ecdf_metric_multi(
+            metric_name=spec["display_name"],
+            labels=labels,
+            sample_sets=[metric.get(spec["value_key"], []) for metric in metrics],
+            percentile_sets=[metric.get(spec["id"], {}) for metric in metrics],
             axis_label=spec["axis_label"],
             output_path=output_path,
             title=title,
@@ -522,6 +704,128 @@ def _plot_ecdf_metric(
     _plot_ecdf_series(axis, samples_b, label_b, "#d62728")
     _plot_percentile_markers(axis, percentiles_a, "#1f77b4")
     _plot_percentile_markers(axis, percentiles_b, "#d62728")
+    axis.set_title(f"{title} - {metric_name}")
+    axis.set_xlabel(axis_label)
+    axis.set_ylabel("Cumulative Probability（累计概率）")
+    axis.grid(alpha=0.3)
+    axis.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _series_color(index: int) -> str:
+    palette = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"]
+    return palette[index % len(palette)]
+
+
+def _plot_stacked_completion_metric_multi(
+    metric_name: str,
+    labels: list[str],
+    metrics: list[dict[str, Any]],
+    axis_label: str,
+    output_path: Path,
+    title: str,
+) -> None:
+    communication_values = [float(metric.get("communication_execution_time_ms", 0.0) or 0.0) for metric in metrics]
+    solver_values = [float(metric.get("planning_time_ms", 0.0) or 0.0) for metric in metrics]
+    totals = [float(metric.get("completion_time_ms", 0.0) or 0.0) for metric in metrics]
+
+    fig, axis = plt.subplots(figsize=(9.5, 5.8))
+    bars_communication = axis.bar(labels, communication_values, color="#4c78a8", width=0.62, label="Communication（通信）")
+    bars_solver = axis.bar(
+        labels,
+        solver_values,
+        bottom=communication_values,
+        color="#f58518",
+        width=0.62,
+        label="Planning / Solver（规划/求解）",
+    )
+    axis.set_title(f"{title} - {metric_name}")
+    axis.set_ylabel(axis_label)
+    axis.grid(axis="y", alpha=0.3)
+    axis.legend()
+    for index, total in enumerate(totals):
+        bar = bars_solver[index] if solver_values[index] > 0 else bars_communication[index]
+        top = communication_values[index] + solver_values[index]
+        axis.text(bar.get_x() + bar.get_width() / 2, top, _format_number(total), ha="center", va="bottom")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_bar_metric_multi(
+    metric_name: str,
+    labels: list[str],
+    values: list[float],
+    axis_label: str,
+    output_path: Path,
+    title: str,
+) -> None:
+    fig, axis = plt.subplots(figsize=(9.0, 5.0))
+    bars = axis.bar(labels, values, color=[_series_color(index) for index in range(len(labels))], width=0.62)
+    axis.set_title(f"{title} - {metric_name}")
+    axis.set_ylabel(axis_label)
+    axis.grid(axis="y", alpha=0.3)
+    for bar, value in zip(bars, values):
+        axis.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), _format_number(value), ha="center", va="bottom")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_grouped_bar_metric_multi(
+    metric_name: str,
+    labels: list[str],
+    percentile_dicts: list[dict[str, float]],
+    axis_label: str,
+    output_path: Path,
+    title: str,
+) -> None:
+    categories = [label for _, label in QUEUE_PERCENTILE_LEVELS]
+    positions = list(range(len(categories)))
+    participant_count = max(1, len(labels))
+    width = 0.75 / participant_count
+
+    fig, axis = plt.subplots(figsize=(9.5, 5.3))
+    for participant_index, label in enumerate(labels):
+        values = [float(percentile_dicts[participant_index].get(category, 0.0) or 0.0) for category in categories]
+        offset = (participant_index - (participant_count - 1) / 2.0) * width
+        bars = axis.bar(
+            [position + offset for position in positions],
+            values,
+            width=width,
+            color=_series_color(participant_index),
+            label=label,
+        )
+        for bar in bars:
+            axis.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), _format_number(bar.get_height()), ha="center", va="bottom")
+
+    axis.set_title(f"{title} - {metric_name}")
+    axis.set_xticks(positions)
+    axis.set_xticklabels(categories)
+    axis.set_ylabel(axis_label)
+    axis.grid(axis="y", alpha=0.3)
+    axis.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_ecdf_metric_multi(
+    metric_name: str,
+    labels: list[str],
+    sample_sets: list[list[float]],
+    percentile_sets: list[dict[str, float]],
+    axis_label: str,
+    output_path: Path,
+    title: str,
+) -> None:
+    fig, axis = plt.subplots(figsize=(9.8, 5.5))
+    for index, label in enumerate(labels):
+        color = _series_color(index)
+        _plot_ecdf_series(axis, sample_sets[index], label, color)
+        _plot_percentile_markers(axis, percentile_sets[index], color)
     axis.set_title(f"{title} - {metric_name}")
     axis.set_xlabel(axis_label)
     axis.set_ylabel("Cumulative Probability（累计概率）")

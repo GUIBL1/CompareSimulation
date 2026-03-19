@@ -12,6 +12,7 @@ from simulator.core.models import RuntimeState
 from simulator.metrics import export_experiment_results
 from simulator.schedulers.base import Scheduler
 from simulator.schedulers.crux import CruxScheduler
+from simulator.schedulers.ecmp import EcmpScheduler
 from simulator.schedulers.teccl import TECCLScheduler
 from simulator.schedulers.teccl import TECCLStrategy
 from simulator.topology.builder import build_topology
@@ -133,4 +134,6 @@ class ExperimentRunner:
         if scheduler_config.type == "teccl":
             strategy = TECCLStrategy(**scheduler_config.teccl)
             return TECCLScheduler(strategy=strategy)
+        if scheduler_config.type == "ecmp":
+            return EcmpScheduler(**scheduler_config.ecmp)
         raise ValueError(f"Unsupported scheduler type: {scheduler_config.type}")

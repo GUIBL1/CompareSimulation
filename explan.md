@@ -247,16 +247,16 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 
 它内部调用 scripts/compare_experiments.py，按如下顺序工作：
 
-1. 读取两份 experiment YAML。
-2. 分别运行 experiment-a 和 experiment-b。
-3. 将两边原始结果写入同一输出根目录下的 run_a 和 run_b。
-4. 基于两边结果生成 comparison_summary.json 和一指标一图输出。
+1. 读取三份 experiment YAML。
+2. 分别运行 experiment-a、experiment-b 和 experiment-c。
+3. 将三边原始结果写入同一输出根目录下的 run_a、run_b 和 run_c。
+4. 基于三边结果生成 comparison_summary.json（participants 三侧）和一指标一图输出。
 5. 写出 comparison_manifest.json，记录输入 experiment、显示标签与输出目录。
 
 它的命令格式是：
 
 ```bash
-./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <output-dir> [extra compare_experiments.py args...]
+./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <experiment-c.yaml> <output-dir> [extra compare_experiments.py args...]
 ```
 
 其中最常用的额外参数是：
@@ -274,7 +274,8 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 1. comparison_manifest.json
 2. run_a/
 3. run_b/
-4. comparison/
+4. run_c/
+5. comparison/
 
 其中 comparison/ 下最关键的是：
 

@@ -66,9 +66,10 @@ metrics:
 
 ### scheduler
 
-- `type`：必填，只能是 `crux` 或 `teccl`。
+- `type`：必填，只能是 `crux`、`teccl` 或 `ecmp`。
 - `crux`：CRUX 专属参数块。
 - `teccl`：TECCL 专属参数块。
+- `ecmp`：ECMP baseline 专属参数块。
 
 注意：两个参数块都可以存在，但只有 `scheduler.type` 对应的那一块会被真正消费。
 
@@ -98,6 +99,12 @@ metrics:
 - `allow_switch_replication`：是否允许交换机复制。当前公平实验通常设为 `false`。
 - `enable_gpu_buffer`：是否启用 GPU buffer 语义。
 - `enable_switch_buffer`：是否启用交换机 buffer 语义。当前通常设为 `false`。
+
+#### ECMP 参数
+
+- `stable_per_flow`：是否使用按 flow_id 稳定哈希选路。默认 `true`。
+  - `true`：同一 flow 固定映射到候选等价路径中的一条。
+  - `false`：对同一 `(src,dst)` 目的对做轮询选路。
 
 ### simulation
 
@@ -147,6 +154,15 @@ scheduler:
     allow_switch_replication: false
     enable_gpu_buffer: true
     enable_switch_buffer: false
+```
+
+## ECMP 示例
+
+```yaml
+scheduler:
+  type: ecmp
+  ecmp:
+    stable_per_flow: true
 ```
 
 ## 运行方式
@@ -199,5 +215,6 @@ scheduler:
 - `scheduler.type=teccl` 但没有显式限制 `max_epoch_count`，导致时间展开 MILP 模型规模过大。
 - `scheduler.type=crux` 但同时漏写 `scheduler.crux.max_priority_levels` 和 `scheduler.crux.hardware_priority_count`。
 - `scheduler.type=crux` 但没有开启 `enable_priority_aware_bandwidth`，导致 priority 数值导出存在而运行时行为仍接近纯公平共享。
+- `scheduler.type=ecmp` 但误以为会启用 CRUX 的 intensity/priority 语义；ECMP baseline 只做等价路径选路。
 - `output_dir` 为空。
 - `topology_file`、`workload_file` 路径写错。
