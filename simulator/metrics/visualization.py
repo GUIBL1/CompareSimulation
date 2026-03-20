@@ -883,6 +883,15 @@ def _compute_comparison_metrics(
             repetition_summary.get("crux_end_to_end_time_ms", planning_time_ms + communication_execution_time_ms)
             or (planning_time_ms + communication_execution_time_ms)
         )
+    elif scheduler_type == "crossweaver":
+        planning_time_ms = float(repetition_summary.get("crossweaver_scheduler_wall_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("crossweaver_communication_execution_time_ms", runtime_completion_time_ms) or runtime_completion_time_ms
+        )
+        end_to_end_time_ms = float(
+            repetition_summary.get("crossweaver_end_to_end_time_ms", planning_time_ms + communication_execution_time_ms)
+            or (planning_time_ms + communication_execution_time_ms)
+        )
     else:
         planning_time_ms = 0.0
         communication_execution_time_ms = runtime_completion_time_ms

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from math import exp
+from time import perf_counter
 from typing import Any
 
 from simulator.core.models import RuntimeState
@@ -50,6 +51,10 @@ class CrossWeaverScheduler(Scheduler):
     queue_wait_estimation_mode: str = "zero"
     observed_queue_wait_ms_by_flow: dict[str, float] = field(default_factory=dict)
     last_debug_state: dict[str, Any] = field(default_factory=dict)
+    last_scheduler_wall_time_ms: float = 0.0
+    last_stage1a_time_ms: float = 0.0
+    last_stage1b_time_ms: float = 0.0
+    last_stage2_time_ms: float = 0.0
 
     def on_workload_arrival(self, job: UnifiedJob, runtime_state: RuntimeState) -> None:
         return None
@@ -62,14 +67,17 @@ class CrossWeaverScheduler(Scheduler):
         return any(flow.status == "completed" for flow in runtime_state.flow_states.values())
 
     def compute_schedule(self, runtime_state: RuntimeState) -> ScheduleDecision:
+        started_at = perf_counter()
         link_by_arc = self._build_link_lookup(runtime_state)
         flow_demands, intra_tor_demands = self._build_demands(runtime_state)
         cross_flow_demands = [demand for demand in flow_demands if demand.dc_source != demand.dc_destination]
 
+        stage1a_started_at = perf_counter()
         theta_star, cross_rate_by_flow = self._stage1a_rate_commitment(
             cross_flow_demands=cross_flow_demands,
             link_by_arc=link_by_arc,
         )
+        self.last_stage1a_time_ms = (perf_counter() - stage1a_started_at) * 1000.0
         stage1a_residuals = self._stage1a_constraint_residuals(
             theta=theta_star,
             cross_flow_demands=cross_flow_demands,
@@ -78,17 +86,21 @@ class CrossWeaverScheduler(Scheduler):
         for demand in cross_flow_demands:
             demand.selected_rate_gbps = cross_rate_by_flow.get(demand.flow_id, 0.0)
 
+        stage1b_started_at = perf_counter()
         stage1b_result = self._stage1b_intra_realization(
             cross_flow_demands=cross_flow_demands,
             link_by_arc=link_by_arc,
         )
+        self.last_stage1b_time_ms = (perf_counter() - stage1b_started_at) * 1000.0
 
+        stage2_started_at = perf_counter()
         stage2_result = self._stage2_intra_completion(
             intra_tor_demands=intra_tor_demands,
             residual_capacity_by_link=stage1b_result["residual_capacity_by_link"],
             runtime_state=runtime_state,
             link_by_arc=link_by_arc,
         )
+        self.last_stage2_time_ms = (perf_counter() - stage2_started_at) * 1000.0
 
         wcmp_weights = stage2_result["wcmp_weights"]
         path_assignments: dict[str, list[str]] = {}
@@ -106,6 +118,10 @@ class CrossWeaverScheduler(Scheduler):
 
         self.last_debug_state = {
             "scheduler": "crossweaver",
+            "crossweaver_scheduler_wall_time_ms": self.last_scheduler_wall_time_ms,
+            "crossweaver_stage1a_time_ms": self.last_stage1a_time_ms,
+            "crossweaver_stage1b_time_ms": self.last_stage1b_time_ms,
+            "crossweaver_stage2_time_ms": self.last_stage2_time_ms,
             "theta_star": theta_star,
             "cross_rate_by_flow_gbps": cross_rate_by_flow,
             "stage1a_constraint_residuals": stage1a_residuals,
@@ -129,6 +145,8 @@ class CrossWeaverScheduler(Scheduler):
                 for (src, dst), weights in wcmp_weights.items()
             },
         }
+        self.last_scheduler_wall_time_ms = (perf_counter() - started_at) * 1000.0
+        self.last_debug_state["crossweaver_scheduler_wall_time_ms"] = self.last_scheduler_wall_time_ms
 
         return ScheduleDecision(
             decision_time_ms=runtime_state.now_ms,
@@ -142,7 +160,12 @@ class CrossWeaverScheduler(Scheduler):
         )
 
     def export_debug_state(self) -> dict[str, Any]:
-        return dict(self.last_debug_state)
+        debug_state = dict(self.last_debug_state)
+        debug_state.setdefault("crossweaver_scheduler_wall_time_ms", self.last_scheduler_wall_time_ms)
+        debug_state.setdefault("crossweaver_stage1a_time_ms", self.last_stage1a_time_ms)
+        debug_state.setdefault("crossweaver_stage1b_time_ms", self.last_stage1b_time_ms)
+        debug_state.setdefault("crossweaver_stage2_time_ms", self.last_stage2_time_ms)
+        return debug_state
 
     def _build_demands(self, runtime_state: RuntimeState) -> tuple[list[_FlowDemand], list[_TORDemand]]:
         demands: list[_FlowDemand] = []

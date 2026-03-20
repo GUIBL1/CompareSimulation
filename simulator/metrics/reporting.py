@@ -214,6 +214,27 @@ def _build_phase_timing_summary(
             phase_summary["dominant_phase"] = "communication"
         else:
             phase_summary["dominant_phase"] = "balanced"
+    if scheduler_type == "crossweaver":
+        scheduler_wall_time_ms = float(repetition_summary.get("crossweaver_scheduler_wall_time_ms", 0.0) or 0.0)
+        communication_execution_time_ms = float(
+            repetition_summary.get("crossweaver_communication_execution_time_ms", completion_time_ms) or completion_time_ms
+        )
+        end_to_end_time_ms = float(
+            repetition_summary.get("crossweaver_end_to_end_time_ms", scheduler_wall_time_ms + communication_execution_time_ms)
+            or (scheduler_wall_time_ms + communication_execution_time_ms)
+        )
+        phase_summary["crossweaver_stage1a_time_ms"] = float(repetition_summary.get("crossweaver_stage1a_time_ms", 0.0) or 0.0)
+        phase_summary["crossweaver_stage1b_time_ms"] = float(repetition_summary.get("crossweaver_stage1b_time_ms", 0.0) or 0.0)
+        phase_summary["crossweaver_stage2_time_ms"] = float(repetition_summary.get("crossweaver_stage2_time_ms", 0.0) or 0.0)
+        phase_summary["crossweaver_scheduler_wall_time_ms"] = scheduler_wall_time_ms
+        phase_summary["crossweaver_communication_execution_time_ms"] = communication_execution_time_ms
+        phase_summary["crossweaver_end_to_end_time_ms"] = end_to_end_time_ms
+        if scheduler_wall_time_ms > communication_execution_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "scheduler"
+        elif communication_execution_time_ms > scheduler_wall_time_ms * 1.2:
+            phase_summary["dominant_phase"] = "communication"
+        else:
+            phase_summary["dominant_phase"] = "balanced"
     if scheduler_type == "teccl":
         epoch_size_ms = float((scheduler_debug_state.get("strategy") or {}).get("epoch_size_ms", 0.0) or 0.0)
         active_epochs = [item for item in schedule_history if int(item.get("epoch_action_count", 0)) > 0]

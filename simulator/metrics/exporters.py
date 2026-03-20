@@ -9,6 +9,7 @@ from typing import Any
 from simulator.config.models import ExperimentConfig
 from simulator.core.models import LinkState
 from simulator.core.models import RuntimeState
+from simulator.schedulers.crossweaver_metrics import build_crossweaver_run_metrics
 from simulator.schedulers.crux_metrics import build_crux_run_metrics
 from simulator.schedulers.crux_metrics import build_crux_scheduler_stats_payload
 
@@ -137,9 +138,23 @@ def _build_run_summary(
     summary = dict(common_metrics)
     if experiment.scheduler.type == "crux":
         summary.update(_build_crux_metrics(runtime, scheduler_debug_state))
+    if experiment.scheduler.type == "crossweaver":
+        summary.update(_build_crossweaver_metrics(runtime, scheduler_debug_state))
     if experiment.scheduler.type == "teccl":
         summary.update(_build_teccl_metrics(scheduler_debug_state, schedule_history))
     return summary
+
+
+def _build_crossweaver_metrics(runtime: RuntimeState, scheduler_debug_state: dict[str, Any]) -> dict[str, Any]:
+    metrics = build_crossweaver_run_metrics(runtime, scheduler_debug_state)
+    return {
+        "crossweaver_scheduler_wall_time_ms": float(metrics.get("crossweaver_scheduler_wall_time_ms", 0.0) or 0.0),
+        "crossweaver_stage1a_time_ms": float(metrics.get("crossweaver_stage1a_time_ms", 0.0) or 0.0),
+        "crossweaver_stage1b_time_ms": float(metrics.get("crossweaver_stage1b_time_ms", 0.0) or 0.0),
+        "crossweaver_stage2_time_ms": float(metrics.get("crossweaver_stage2_time_ms", 0.0) or 0.0),
+        "crossweaver_communication_execution_time_ms": float(metrics.get("crossweaver_communication_execution_time_ms", 0.0) or 0.0),
+        "crossweaver_end_to_end_time_ms": float(metrics.get("crossweaver_end_to_end_time_ms", 0.0) or 0.0),
+    }
 
 
 def _build_crux_metrics(runtime: RuntimeState, scheduler_debug_state: dict[str, Any]) -> dict[str, Any]:
