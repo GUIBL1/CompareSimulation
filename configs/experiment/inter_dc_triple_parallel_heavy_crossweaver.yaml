@@ -1,0 +1,41 @@
+meta:
+  name: inter_dc_parallel_triple_heavy_crossweaver
+  version: 1
+  description: CrossWeaver on the triple inter-dc topology under full-duplex heavy cross-dc traffic
+
+inputs:
+  topology_file: configs/topology/inter_dc_triple_fabric_topology.yaml
+  workload_file: configs/workload/inter_dc_parallel_full_duplex_heavy_workload.yaml
+
+scheduler:
+  type: crossweaver
+  crux:
+    max_priority_levels: 8
+  teccl:
+    epoch_size_ms: 100
+    solver_backend: highs
+  ecmp:
+    stable_per_flow: true
+  crossweaver:
+    slot_ms: 1.0
+    headroom_ratio: 0.1
+    epsilon: 0.08
+    gamma: 0.05
+    stage1_max_iterations: 24
+    stage2_max_iterations: 32
+    stage2_binary_search_rounds: 24
+    feasibility_tolerance: 1.0e-6
+    queue_wait_estimation_mode: zero
+
+simulation:
+  time_unit: ms
+  max_time_ms: 200000
+  bandwidth_sharing_model: max_min_fair
+  random_seed: 20260308
+  repetitions: 1
+
+metrics:
+  export_csv: true
+  export_json: true
+  export_trace: true
+  output_dir: results/inter_dc_parallel_triple_heavy_crossweaver

@@ -102,37 +102,48 @@ conda activate networkSimulation
 
 它会自动完成以下步骤：
 
-- 读取三份 experiment 配置
-- 分别运行 experiment-a、experiment-b 和 experiment-c（通常分别对应 CRUX / TE-CCL / ECMP）
-- 将三边原始结果写到同一个输出根目录下的 run_a、run_b 和 run_c
-- 自动生成 comparison_summary.json（三方同屏）和一指标一图的 comparison/metric_plots
+- 读取至少四份 experiment 配置（由参数指定）
+- 分别运行所有实验
+- 将原始结果写到同一个输出根目录下的 run_1、run_2、...、run_n
+- 自动生成 comparison_summary.json（participants 多方同屏）和一指标一图的 comparison/metric_plots
 - 写出 comparison_manifest.json，记录输入配置、显示标签和输出位置
 
 基本命令格式：
 
 ```bash
 conda activate networkSimulation
-./run_experiment_compare.sh <experiment-a.yaml> <experiment-b.yaml> <experiment-c.yaml> <output-dir>
+./run_experiment_compare.sh \
+    --output-dir <output-dir> \
+    --experiment <exp1.yaml> \
+    --experiment <exp2.yaml> \
+    --experiment <exp3.yaml> \
+    --experiment <exp4.yaml> \
+    [--experiment <expN.yaml> ...] \
+    [--label <label1> --label <label2> ...]
 ```
 
-例如，对比 triple 拓扑下的 CRUX、TE-CCL 与 ECMP baseline：
+例如，对比 triple 拓扑下的 ECMP、CRUX、TE-CCL 与 CrossWeaver：
 
 ```bash
 conda activate networkSimulation
 ./run_experiment_compare.sh \
-    configs/experiment/inter_dc_triple_parallel_crux.yaml \
-    configs/experiment/inter_dc_triple_parallel_teccl.yaml \
-    configs/experiment/inter_dc_triple_parallel_ecmp.yaml \
-    results/inter_dc_triple_parallel_crux_vs_teccl_vs_ecmp \
+        --output-dir results/inter_dc_triple_parallel_fourway \
+        --experiment configs/experiment/inter_dc_triple_parallel_heavy_ecmp.yaml \
+        --experiment configs/experiment/inter_dc_triple_parallel_heavy_crux.yaml \
+        --experiment configs/experiment/inter_dc_triple_parallel_heavy_teccl.yaml \
+        --experiment configs/experiment/inter_dc_triple_parallel_heavy_crossweaver.yaml \
+        --label ECMP --label CRUX --label TECCL --label CrossWeaver
 ```
 输出目录结构通常如下：
 
 ```text
 results/<your-compare-dir>/
 ├── comparison_manifest.json
-├── run_a/
-├── run_b/
-├── run_c/
+├── run_1/
+├── run_2/
+├── run_3/
+├── run_4/
+├── ...
 └── comparison/
     ├── comparison_summary.json
     └── metric_plots/
@@ -152,11 +163,12 @@ results/<your-compare-dir>/
 
 - comparison/comparison_summary.json
 - comparison/metric_plots/*.png
-- run_a/summary.json
-- run_b/summary.json
-- run_c/summary.json
+- run_1/summary.json
+- run_2/summary.json
+- run_3/summary.json
+- run_4/summary.json
 
-comparison_summary.json 中会写出每个指标的 display_name、chart_type，以及 participants 三侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
+comparison_summary.json 中会写出每个指标的 display_name、chart_type，以及 participants 多侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
 
 
 ## 结果文件说明

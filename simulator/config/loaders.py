@@ -155,8 +155,8 @@ def _validate_workload_config(config: WorkloadConfig, path: Path) -> None:
 def _validate_experiment_config(config: ExperimentConfig, path: Path) -> None:
     _require(config.meta.name != "", f"Experiment meta.name is required in {path}")
     _require(
-        config.scheduler.type in {"crux", "teccl", "ecmp"},
-        f"Experiment scheduler.type must be 'crux', 'teccl', or 'ecmp' in {path}",
+        config.scheduler.type in {"crux", "teccl", "ecmp", "crossweaver"},
+        f"Experiment scheduler.type must be 'crux', 'teccl', 'ecmp', or 'crossweaver' in {path}",
     )
     _require(config.simulation.max_time_ms > 0, f"Experiment simulation.max_time_ms must be > 0 in {path}")
     _require(config.simulation.repetitions > 0, f"Experiment simulation.repetitions must be > 0 in {path}")
@@ -226,6 +226,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
             crux=dict(scheduler_raw.get("crux", {})),
             teccl=dict(scheduler_raw.get("teccl", {})),
             ecmp=dict(scheduler_raw.get("ecmp", {})),
+            crossweaver=dict(scheduler_raw.get("crossweaver", {})),
         ),
         simulation=SimulationConfig(**_ensure_mapping(raw.get("simulation", {}), "simulation", config_path)),
         metrics=MetricsConfig(**_ensure_mapping(raw.get("metrics", {}), "metrics", config_path)),

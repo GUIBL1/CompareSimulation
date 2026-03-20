@@ -11,6 +11,7 @@ from simulator.core.engine import RuntimeEngine
 from simulator.core.models import RuntimeState
 from simulator.metrics import export_experiment_results
 from simulator.schedulers.base import Scheduler
+from simulator.schedulers.crossweaver import CrossWeaverScheduler
 from simulator.schedulers.crux import CruxScheduler
 from simulator.schedulers.ecmp import EcmpScheduler
 from simulator.schedulers.teccl import TECCLScheduler
@@ -136,4 +137,6 @@ class ExperimentRunner:
             return TECCLScheduler(strategy=strategy)
         if scheduler_config.type == "ecmp":
             return EcmpScheduler(**scheduler_config.ecmp)
+        if scheduler_config.type == "crossweaver":
+            return CrossWeaverScheduler(**scheduler_config.crossweaver)
         raise ValueError(f"Unsupported scheduler type: {scheduler_config.type}")

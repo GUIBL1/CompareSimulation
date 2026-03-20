@@ -13,6 +13,7 @@ from simulator.config.loaders import load_experiment_config
 from simulator.experiment.runner import ExperimentRunner
 from simulator.metrics import export_experiment_results
 from simulator.metrics import generate_experiment_comparison_visuals
+from simulator.metrics import generate_experiment_multi_comparison_visuals
 from simulator.metrics import generate_experiment_three_way_comparison_visuals
 
 
@@ -39,71 +40,106 @@ def _export_run_result(experiment_file: Path, output_dir: Path):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment configs, compare them, and write all outputs under one directory.")
-    parser.add_argument("--experiment-a", required=True, help="First experiment config path.")
-    parser.add_argument("--experiment-b", required=True, help="Second experiment config path.")
+    parser.add_argument(
+        "--experiment",
+        action="append",
+        default=[],
+        help="Experiment config path. Repeat this option to compare multiple experiments.",
+    )
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        help="Display label matching each --experiment in order.",
+    )
+    parser.add_argument("--experiment-a", default=None, help="First experiment config path (legacy mode).")
+    parser.add_argument("--experiment-b", default=None, help="Second experiment config path (legacy mode).")
     parser.add_argument("--experiment-c", default=None, help="Optional third experiment config path for three-way comparison.")
     parser.add_argument("--output-dir", required=True, help="Directory to store both run outputs and comparison outputs.")
     parser.add_argument("--label-a", default=None, help="Display label for the first experiment. Defaults to the experiment name.")
     parser.add_argument("--label-b", default=None, help="Display label for the second experiment. Defaults to the experiment name.")
     parser.add_argument("--label-c", default=None, help="Display label for the third experiment. Defaults to the experiment name.")
+    parser.add_argument("--label-d", default=None, help="Display label for the fourth experiment. Defaults to the experiment name.")
     parser.add_argument("--title", default="Experiment Comparison", help="Comparison title prefix.")
     args = parser.parse_args()
 
-    experiment_a = Path(args.experiment_a).resolve()
-    experiment_b = Path(args.experiment_b).resolve()
-    experiment_c = Path(args.experiment_c).resolve() if args.experiment_c else None
-    experiment_a_config = load_experiment_config(experiment_a)
-    experiment_b_config = load_experiment_config(experiment_b)
-    experiment_c_config = load_experiment_config(experiment_c) if experiment_c is not None else None
+    experiment_paths: list[Path]
+    if args.experiment:
+        experiment_paths = [Path(item).resolve() for item in args.experiment]
+    else:
+        if not args.experiment_a or not args.experiment_b:
+            raise ValueError("Either provide repeated --experiment options or both --experiment-a and --experiment-b")
+        experiment_paths = [Path(args.experiment_a).resolve(), Path(args.experiment_b).resolve()]
+        if args.experiment_c:
+            experiment_paths.append(Path(args.experiment_c).resolve())
+    if len(experiment_paths) < 2:
+        raise ValueError("At least two experiment files are required")
+
+    experiment_configs = [load_experiment_config(experiment_path) for experiment_path in experiment_paths]
     output_dir = Path(args.output_dir).resolve()
-    run_a_dir = output_dir / "run_a"
-    run_b_dir = output_dir / "run_b"
-    run_c_dir = output_dir / "run_c"
     comparison_dir = output_dir / "comparison"
     output_dir.mkdir(parents=True, exist_ok=True)
-    label_a = args.label_a or experiment_a_config.meta.name
-    label_b = args.label_b or experiment_b_config.meta.name
-    label_c = args.label_c or (experiment_c_config.meta.name if experiment_c_config is not None else None)
 
-    run_a = _export_run_result(experiment_a, run_a_dir)
-    run_b = _export_run_result(experiment_b, run_b_dir)
-    run_c = _export_run_result(experiment_c, run_c_dir) if experiment_c is not None else None
-    if run_c is not None:
-        comparison_outputs = generate_experiment_three_way_comparison_visuals(
-            result_a_dir=run_a_dir,
-            result_b_dir=run_b_dir,
-            result_c_dir=run_c_dir,
+    labels: list[str]
+    if args.experiment:
+        legacy_labels = [args.label_a, args.label_b, args.label_c, args.label_d]
+        labels = [
+            (
+                args.label[index]
+                if index < len(args.label) and args.label[index]
+                else (legacy_labels[index] if index < len(legacy_labels) and legacy_labels[index] else experiment_configs[index].meta.name)
+            )
+            for index in range(len(experiment_paths))
+        ]
+    else:
+        labels = [args.label_a or experiment_configs[0].meta.name, args.label_b or experiment_configs[1].meta.name]
+        if len(experiment_paths) >= 3:
+            labels.append(args.label_c or experiment_configs[2].meta.name)
+
+    run_dirs = [output_dir / f"run_{index + 1}" for index in range(len(experiment_paths))]
+    runs = [
+        _export_run_result(experiment_file=experiment_paths[index], output_dir=run_dirs[index])
+        for index in range(len(experiment_paths))
+    ]
+
+    if len(experiment_paths) == 2:
+        comparison_outputs = generate_experiment_comparison_visuals(
+            result_a_dir=run_dirs[0],
+            result_b_dir=run_dirs[1],
             output_dir=comparison_dir,
-            label_a=label_a,
-            label_b=label_b,
-            label_c=label_c,
+            label_a=labels[0],
+            label_b=labels[1],
+            title=args.title,
+        )
+    elif len(experiment_paths) == 3:
+        comparison_outputs = generate_experiment_three_way_comparison_visuals(
+            result_a_dir=run_dirs[0],
+            result_b_dir=run_dirs[1],
+            result_c_dir=run_dirs[2],
+            output_dir=comparison_dir,
+            label_a=labels[0],
+            label_b=labels[1],
+            label_c=labels[2],
             title=args.title,
         )
     else:
-        comparison_outputs = generate_experiment_comparison_visuals(
-            result_a_dir=run_a_dir,
-            result_b_dir=run_b_dir,
+        comparison_outputs = generate_experiment_multi_comparison_visuals(
+            result_dirs=run_dirs,
             output_dir=comparison_dir,
-            label_a=label_a,
-            label_b=label_b,
+            labels=labels,
             title=args.title,
         )
     comparison_summary = json.loads(Path(comparison_outputs["summary_json"]).read_text(encoding="utf-8"))
 
+    run_output_dirs = {f"run_{index + 1}_output_dir": str(run_dirs[index]) for index in range(len(run_dirs))}
     manifest = {
-        "experiment_a": str(experiment_a),
-        "experiment_b": str(experiment_b),
-        "experiment_c": str(experiment_c) if experiment_c is not None else None,
-        "label_a": label_a,
-        "label_b": label_b,
-        "label_c": label_c,
+        "experiments": [str(path) for path in experiment_paths],
+        "labels": labels,
         "title": args.title,
-        "run_a_output_dir": str(run_a_dir),
-        "run_b_output_dir": str(run_b_dir),
-        "run_c_output_dir": str(run_c_dir) if run_c is not None else None,
         "comparison_output_dir": str(comparison_dir),
         "comparison_outputs": comparison_outputs,
         "comparison_metrics": comparison_summary.get("metrics", []),
+        **run_output_dirs,
     }
     manifest_path = output_dir / "comparison_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")

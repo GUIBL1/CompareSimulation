@@ -66,10 +66,11 @@ metrics:
 
 ### scheduler
 
-- `type`：必填，只能是 `crux`、`teccl` 或 `ecmp`。
+- `type`：必填，只能是 `crux`、`teccl`、`ecmp` 或 `crossweaver`。
 - `crux`：CRUX 专属参数块。
 - `teccl`：TECCL 专属参数块。
 - `ecmp`：ECMP baseline 专属参数块。
+- `crossweaver`：CrossWeaver 两阶段调度参数块。
 
 注意：两个参数块都可以存在，但只有 `scheduler.type` 对应的那一块会被真正消费。
 
@@ -105,6 +106,18 @@ metrics:
 - `stable_per_flow`：是否使用按 flow_id 稳定哈希选路。默认 `true`。
   - `true`：同一 flow 固定映射到候选等价路径中的一条。
   - `false`：对同一 `(src,dst)` 目的对做轮询选路。
+
+#### CrossWeaver 参数
+
+- `slot_ms`：时间片长度（毫秒）。
+- `headroom_ratio`：Stage I-B 预留比例 \\(\eta\\)，保留容量 \\(\tilde C_e=(1-\eta)C_e\\)。
+- `epsilon`：Stage I-B MWU 更新步长。
+- `gamma`：Stage II 价格更新步长。
+- `stage1_max_iterations`：Stage I-B 最大迭代次数。
+- `stage2_max_iterations`：Stage II 给定 T 的价格迭代次数。
+- `stage2_binary_search_rounds`：Stage II 对 T 的二分轮数。
+- `feasibility_tolerance`：约束可行性容差。
+- `queue_wait_estimation_mode`：`zero` 或 `observed`，用于 \\(Q_f\\) 估计。
 
 ### simulation
 
@@ -165,6 +178,23 @@ scheduler:
     stable_per_flow: true
 ```
 
+## CrossWeaver 示例
+
+```yaml
+scheduler:
+  type: crossweaver
+  crossweaver:
+    slot_ms: 1.0
+    headroom_ratio: 0.1
+    epsilon: 0.08
+    gamma: 0.05
+    stage1_max_iterations: 24
+    stage2_max_iterations: 32
+    stage2_binary_search_rounds: 24
+    feasibility_tolerance: 1.0e-6
+    queue_wait_estimation_mode: zero
+```
+
 ## 运行方式
 
 单实验一般通过 Python 调用 `ExperimentRunner`，或被更上层脚本间接调用。对于公平矩阵批处理，不建议手写很多 experiment YAML，优先使用 `scripts/run_fair_matrix.py` 自动物化到 `configs/experiment/generated/`。
@@ -216,5 +246,6 @@ scheduler:
 - `scheduler.type=crux` 但同时漏写 `scheduler.crux.max_priority_levels` 和 `scheduler.crux.hardware_priority_count`。
 - `scheduler.type=crux` 但没有开启 `enable_priority_aware_bandwidth`，导致 priority 数值导出存在而运行时行为仍接近纯公平共享。
 - `scheduler.type=ecmp` 但误以为会启用 CRUX 的 intensity/priority 语义；ECMP baseline 只做等价路径选路。
+- `scheduler.type=crossweaver` 但漏配 `headroom_ratio/epsilon/gamma` 等关键参数，导致 MWU 或价格更新不稳定。
 - `output_dir` 为空。
 - `topology_file`、`workload_file` 路径写错。

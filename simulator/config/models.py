@@ -86,6 +86,7 @@ class SchedulerConfig:
     crux: dict[str, Any] = field(default_factory=dict)
     teccl: dict[str, Any] = field(default_factory=dict)
     ecmp: dict[str, Any] = field(default_factory=dict)
+    crossweaver: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

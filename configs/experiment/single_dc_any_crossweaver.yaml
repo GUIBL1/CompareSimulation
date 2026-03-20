@@ -1,0 +1,41 @@
+meta:
+  name: single_dc_any_crossweaver
+  version: 1
+  description: CrossWeaver baseline on single DC topology with generated workload
+
+inputs:
+  topology_file: configs/topology/single_dc_topology.yaml
+  workload_file: configs/workload/generated_workload.yaml
+
+scheduler:
+  type: crossweaver
+  crux:
+    max_priority_levels: 8
+  teccl:
+    epoch_size_ms: 100
+    solver_backend: highs
+  ecmp:
+    stable_per_flow: true
+  crossweaver:
+    slot_ms: 1.0
+    headroom_ratio: 0.1
+    epsilon: 0.08
+    gamma: 0.05
+    stage1_max_iterations: 16
+    stage2_max_iterations: 20
+    stage2_binary_search_rounds: 20
+    feasibility_tolerance: 1.0e-6
+    queue_wait_estimation_mode: zero
+
+simulation:
+  time_unit: ms
+  max_time_ms: 200000
+  bandwidth_sharing_model: max_min_fair
+  random_seed: 20260308
+  repetitions: 1
+
+metrics:
+  export_csv: true
+  export_json: true
+  export_trace: true
+  output_dir: results/single_dc_any_crossweaver
