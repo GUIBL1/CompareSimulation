@@ -18,14 +18,19 @@ scheduler:
     stable_per_flow: true
   crossweaver:
     slot_ms: 1.0
-    headroom_ratio: 0.1
-    epsilon: 0.08
-    gamma: 0.05
-    stage1_max_iterations: 24
-    stage2_max_iterations: 32
-    stage2_binary_search_rounds: 24
+    headroom_ratio: 0.05
+    epsilon: 0.06
+    gamma: 0.04
+    stage1_max_iterations: 30
+    stage2_max_iterations: 56
+    stage2_binary_search_rounds: 30
+    cross_path_ecmp_k: 5
+    stage2_path_split_k: 4
+    stage2_initial_max_paths: 12
+    stage2_max_path_expansion: 32
+    stage2_path_expansion_step: 8
     feasibility_tolerance: 1.0e-6
-    queue_wait_estimation_mode: zero
+    queue_wait_estimation_mode: observed
 
 simulation:
   time_unit: ms

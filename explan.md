@@ -513,3 +513,26 @@ $$
 如果只记一条比较原则，那么就是：
 
 优先比较作业完成率、完成时间、时延分位数和瓶颈链路指标，再用调度器私有字段解释原因，不要把 flow 数量或 epoch action 数直接当成 CRUX 与 TE-CCL 的主胜负指标。
+
+## 10. CrossWeaver：性能与参数相关性说明
+
+在当前实现里，CrossWeaver 的性能与参数选取高度相关，不能简单归因于“算法逻辑不行”。
+
+核心原因有三点：
+1. Stage I 的 `headroom_ratio/epsilon/cross_path_ecmp_k` 直接决定跨域负载是否会过早集中到少数 DCI；
+2. Stage II 的 `gamma/stage2_path_split_k/path expansion` 直接决定域内拥塞是否能被摊平；
+3. `queue_wait_estimation_mode` 会改变 \(Q_f\) 估计，重负载下对尾部表现影响显著。
+
+因此，CrossWeaver 的正确使用方式不是固定一组默认参数，而是在“给定 topology + workload”下做参数搜索。
+
+为此，当前仓库新增了交互式搜索脚本：
+
+```bash
+/home/code/miniconda3/envs/networkSimulation/bin/python configs/experiment/search_crossweaver_params.py
+```
+
+脚本会：
+1. 读取你输入的 CrossWeaver experiment 文件；
+2. 基于该 experiment 指向的 topology/workload 进行 trial 搜索（`bayes` 或 `random`）；
+3. 在多个 seed 上评估通信时间、规划时间和完成率；
+4. 输出 `search_report.json`，并可自动回写最优参数到原 experiment 文件。

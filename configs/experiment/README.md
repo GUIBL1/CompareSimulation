@@ -116,8 +116,83 @@ metrics:
 - `stage1_max_iterations`：Stage I-B 最大迭代次数。
 - `stage2_max_iterations`：Stage II 给定 T 的价格迭代次数。
 - `stage2_binary_search_rounds`：Stage II 对 T 的二分轮数。
+- `cross_path_ecmp_k`：Stage I-A 跨域路径候选上限（按 DCI 签名去重后取前 K）。
+- `stage2_path_split_k`：Stage II 每个 ToR 对按低价格选择的多路径条数。
+- `stage2_initial_max_paths`：Stage II 初始域内候选路径上限。
+- `stage2_max_path_expansion`：Stage II 不可行时扩展后的路径上限。
+- `stage2_path_expansion_step`：Stage II 每轮扩展路径数。
+- `stage1_early_stop_patience`：Stage I-B 提前收敛容忍轮次。
+- `stage2_early_stop_patience`：Stage II 价格迭代提前收敛容忍轮次。
+- `stage2_binary_search_tolerance_ms`：Stage II 二分提前收敛阈值。
 - `feasibility_tolerance`：约束可行性容差。
 - `queue_wait_estimation_mode`：`zero` 或 `observed`，用于 \\(Q_f\\) 估计。
+
+##### CrossWeaver 参数作用与取值影响
+
+1. Stage I-A（跨域速率/选路）
+   - `cross_path_ecmp_k`
+     - 作用：控制每条跨域流可选的跨 DC 路径多样性。
+     - 影响：
+       - 偏小（2~3）：规划更快，但容易集中到少数 DCI，通信尾部风险更高。
+       - 中等（4~5）：通常能显著降低拥塞持续时间和 P99。
+       - 过大（>6）：收益边际下降，规划与重平衡开销上升。
+
+2. Stage I-B（MWU 域内映射）
+   - `headroom_ratio`
+     - 作用：给 Stage II 预留容量，避免 Stage I 把域内链路吃满。
+     - 影响：
+       - 过小（<0.04）：通信可能更快，但在突发负载下鲁棒性下降。
+       - 适中（0.05~0.10）：通常是性能与鲁棒性平衡区间。
+       - 过大（>0.12）：Stage II 可用容量被压缩，完成时间可能变差。
+   - `epsilon`
+     - 作用：MWU 更新步长。
+     - 影响：
+       - 小：更稳定但收敛慢。
+       - 大：收敛快但可能抖动，导致负载波动。
+   - `stage1_max_iterations` / `stage1_early_stop_patience`
+     - 作用：控制 Stage I-B 收敛预算与提前停止。
+     - 影响：预算太低易欠收敛，预算过高会抬高 planning time。
+
+3. Stage II（域内完成时间优化）
+   - `gamma`
+     - 作用：价格更新步长。
+     - 影响：
+       - 偏小：收敛慢，规划时间上升。
+       - 偏大：可能震荡，通信与尾延迟变差。
+   - `stage2_path_split_k`
+     - 作用：每个 ToR 对的多路径分流强度。
+     - 影响：
+       - 偏小：热点难摊平；
+       - 中等（3~5）：常见最优区间；
+       - 过大：路径切分收益趋缓，计算开销增加。
+   - `stage2_initial_max_paths` / `stage2_max_path_expansion` / `stage2_path_expansion_step`
+     - 作用：控制候选路径空间与不可行时扩展速度。
+     - 影响：
+       - 初始太小：容易走到不可行，通信退化；
+       - 扩展太激进：规划时间上升；
+       - 建议先保证 `max_path_expansion >= initial + step`。
+   - `stage2_max_iterations` / `stage2_binary_search_rounds` / `stage2_binary_search_tolerance_ms` / `stage2_early_stop_patience`
+     - 作用：控制 Stage II 的“可行性内循环 + T 二分”预算。
+     - 影响：预算不足会导致欠优化；预算过高会拉长 planning。
+
+4. 队列等待估计
+   - `queue_wait_estimation_mode`
+     - `zero`：忽略队列等待，规划更快，可能低估拥塞。
+     - `observed`：使用在线观测 backlog 估计 \(Q_f\)，对重负载和尾部指标通常更稳。
+
+5. 调参建议（重负载默认起点）
+   - 可优先从以下组合开始：
+     - `headroom_ratio: 0.05`
+     - `epsilon: 0.06`
+     - `gamma: 0.04`
+     - `cross_path_ecmp_k: 5`
+     - `stage2_path_split_k: 4`
+     - `stage2_initial_max_paths: 12`
+     - `stage2_max_path_expansion: 32`
+     - `stage2_path_expansion_step: 8`
+     - `queue_wait_estimation_mode: observed`
+
+   该区间在 30-job heavy workload 下通常可同时改善 planning 与 communication。
 
 ### simulation
 
@@ -229,6 +304,36 @@ scheduler:
 - 汇总结果中包含：
   - 全局最小可行参数组合（按 `planning_horizon_ms` 最小优先）；
   - 每个 `epoch_size_ms` 下最小可行的 `max_epoch_count`。
+
+## CrossWeaver 参数搜索脚本
+
+本目录新增交互式脚本 `search_crossweaver_params.py`，用于针对“指定 topology + workload”的 CrossWeaver 实验自动搜索参数，并可回写最优参数到原实验文件。
+
+运行方式：
+
+```bash
+/home/code/miniconda3/envs/networkSimulation/bin/python configs/experiment/search_crossweaver_params.py
+```
+
+交互输入项：
+1. CrossWeaver 实验文件路径（必填，`scheduler.type` 必须为 `crossweaver`）。
+2. `trial` 数（默认 20）。
+3. 评估 `seeds`（默认 `[base_seed, base_seed+17, base_seed+29]`）。
+4. 搜索方式：`bayes` 或 `random`。
+5. 是否将最优参数直接回写原实验文件。
+
+搜索与评分逻辑：
+- 每个 trial 在多个 seed 上运行同一组参数，取均值与波动。
+- 默认优化目标：
+  - 主目标：`communication_execution_time_ms` 最小；
+  - 次目标：`planning_time_ms` 较低；
+  - 稳定性：通信时间标准差更小；
+  - 完成率惩罚：若 `job_completion_ratio < 1.0`，大幅惩罚。
+- 输出 `results/crossweaver_param_search/<exp_name>_<timestamp>/search_report.json`。
+
+说明：
+- `bayes` 为“贝叶斯式自适应采样”（基于历史优胜样本的概率建模采样），无需额外第三方依赖。
+- 若只想做纯随机扫描，选择 `random`。
 
 ## 书写建议
 
