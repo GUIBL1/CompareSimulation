@@ -1,25 +1,26 @@
 meta:
-  name: inter_dc_parallel_dual_teccl
+  name: inter_dc_parallel_triple_heavy_teccl
   version: 1
-  description: TECCL on the single inter-dc channel topology under parallel cross-dc unicast workload
+  description: TECCL on the triple inter-dc topology under full-duplex heavy cross-dc traffic
 
 inputs:
-  topology_file: configs/topology/inter_dc_dual_fabric_topology.yaml
-  workload_file: configs/workload/inter_dc_parallel_unicast_workload.yaml
+  topology_file: configs/topology/inter_dc_triple_topology.yaml
+  workload_file: configs/workload/inter_dc_heavy_workload.yaml
 
 scheduler:
   type: teccl
   crux:
     max_priority_levels: 8
-    candidate_path_limit: 12
+    candidate_path_limit: 24
     intensity_window_iterations: 3
   teccl:
-    epoch_size_ms: 5.0
+    epoch_size_ms: 15
     solver_backend: highs
-    max_epoch_count: 3000
-    max_solver_time_ms: 120000
-    solver_threads: 4
-    enforce_integrality: true
+    max_epoch_count: 70
+    max_solver_time_ms: 7200000
+    mip_gap: 0.2
+    solver_threads: 50
+    enforce_integrality: false
     objective_mode: weighted_early_completion
     switch_buffer_policy: zero
     allow_gpu_replication: true
@@ -29,7 +30,7 @@ scheduler:
 
 simulation:
   time_unit: ms
-  max_time_ms: 200000
+  max_time_ms: 20000000
   bandwidth_sharing_model: max_min_fair
   random_seed: 20260308
   repetitions: 1
@@ -38,4 +39,4 @@ metrics:
   export_csv: true
   export_json: true
   export_trace: true
-  output_dir: results/inter_dc_parallel_dual_teccl
+  output_dir: results/inter_dc_parallel_triple_heavy_teccl

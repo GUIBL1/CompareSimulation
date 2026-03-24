@@ -534,19 +534,19 @@ links:
       dst: gateway_1_c
     - src: gateway_0_a
       dst: gateway_1_a
-      latency_us: 5000
+      latency_us: 10000
       attributes:
         inter_dc: true
         channel: a
     - src: gateway_0_b
       dst: gateway_1_b
-      latency_us: 5000
+      latency_us: 10000
       attributes:
         inter_dc: true
         channel: b
     - src: gateway_0_c
       dst: gateway_1_c
-      latency_us: 5000
+      latency_us: 10000
       attributes:
         inter_dc: true
         channel: c

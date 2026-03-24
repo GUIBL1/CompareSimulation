@@ -4,8 +4,8 @@ meta:
   description: CrossWeaver on the triple inter-dc topology under full-duplex heavy cross-dc traffic
 
 inputs:
-  topology_file: configs/topology/inter_dc_triple_fabric_topology.yaml
-  workload_file: configs/workload/inter_dc_parallel_full_duplex_heavy_workload.yaml
+  topology_file: configs/topology/inter_dc_triple_topology.yaml
+  workload_file: configs/workload/inter_dc_heavy_workload.yaml
 
 scheduler:
   type: crossweaver

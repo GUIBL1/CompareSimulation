@@ -1,17 +1,17 @@
 meta:
-  name: inter_dc_mild_crux
+  name: inter_dc_parallel_triple_heavy_crux
   version: 1
-  description: CRUX on mild inter-dc broadcast workload
+  description: CRUX on the triple inter-dc topology under full-duplex heavy cross-dc traffic
 
 inputs:
-  topology_file: configs/topology/inter_dc_dual_fabric_topology.yaml
-  workload_file: configs/workload/inter_dc_mild_workload.yaml
+  topology_file: configs/topology/inter_dc_triple_topology.yaml
+  workload_file: configs/workload/inter_dc_heavy_workload.yaml
 
 scheduler:
   type: crux
   crux:
     hardware_priority_count: 8
-    candidate_path_limit: 8
+    candidate_path_limit: 24
     intensity_window_iterations: 3
     topological_order_sample_count: 8
     intensity_definition_mode: selected_path_max_flow_time
@@ -19,7 +19,7 @@ scheduler:
     enable_priority_aware_bandwidth: true
   teccl:
     epoch_size_ms: 1.0
-    solver_backend: exact_milp_solver
+    solver_backend: heuristic_solver
     max_solver_time_ms: 1000
     allow_gpu_replication: true
     allow_switch_replication: false
@@ -28,13 +28,13 @@ scheduler:
 
 simulation:
   time_unit: ms
-  max_time_ms: 200
+  max_time_ms: 15000
   bandwidth_sharing_model: max_min_fair
-  random_seed: 20260307
+  random_seed: 20260308
   repetitions: 1
 
 metrics:
   export_csv: true
   export_json: true
   export_trace: true
-  output_dir: results/inter_dc_mild_crux
+  output_dir: results/inter_dc_parallel_triple_heavy_crux

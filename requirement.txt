@@ -1,7 +1,6 @@
 # Python package versions for this project
-# Generated on: 2026-03-13
-# Python environment: /home/code/miniconda3/envs/networkSimulation/bin/python
-# Python version: 3.13.12
+# Install with: python -m pip install -r requirement.txt
+# Recommended env: conda/venv named networkSimulation
 
 highspy==1.13.1
 matplotlib==3.10.8

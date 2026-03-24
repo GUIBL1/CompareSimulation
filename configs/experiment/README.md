@@ -2,6 +2,19 @@
 
 本目录的实验配置用于运行单个仿真实验。它把 topology、workload、scheduler、simulation 和 metrics 串起来，是 `ExperimentRunner` 的直接输入。
 
+## 当前示例实验文件
+
+- `single_dc_any_ecmp.yaml`
+- `single_dc_any_crux.yaml`
+- `single_dc_any_teccl.yaml`
+- `single_dc_any_crossweaver.yaml`
+- `inter_dc_triple_heavy_ecmp.yaml`
+- `inter_dc_triple_heavy_crux.yaml`
+- `inter_dc_triple_heavy_teccl.yaml`
+- `inter_dc_triple_heavy_crossweaver.yaml`
+
+这些文件可直接作为 `scripts/compare_experiments.py` 的输入进行多算法对比。
+
 
 ## 基本结构
 
@@ -281,7 +294,7 @@ scheduler:
 运行方式：
 
 ```bash
-/home/inspur-02/.conda/envs/networkSimulation/bin/python configs/experiment/scan_teccl_feasibility.py
+python configs/experiment/scan_teccl_feasibility.py
 ```
 
 脚本会按顺序交互询问：
@@ -312,8 +325,13 @@ scheduler:
 运行方式：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python configs/experiment/search_crossweaver_params.py
+python configs/experiment/search_crossweaver_params.py
 ```
+
+## 相关脚本关系
+
+- `scripts/compare_experiments.py`：负责运行多个 experiment 并统一生成对比结果；支持弹性实验数量（最少 2 个）。
+- `scripts/export_teccl_solver_stats.py`：只导出 TE-CCL 求解器统计，不参与 compare 主流程，不会被 compare 脚本自动调用。
 
 交互输入项：
 1. CrossWeaver 实验文件路径（必填，`scheduler.type` 必须为 `crossweaver`）。

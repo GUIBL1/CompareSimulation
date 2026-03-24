@@ -5,6 +5,12 @@
 - generated：用少量参数生成拓扑。
 - explicit：显式列出节点和链路。
 
+## 当前示例拓扑文件
+
+- `single_dc_topology.yaml`：单数据中心拓扑。
+- `inter_dc_dual_topology.yaml`：双数据中心拓扑。
+- `inter_dc_triple_topology.yaml`：三数据中心拓扑。
+
 ## 基本结构
 
 ```yaml

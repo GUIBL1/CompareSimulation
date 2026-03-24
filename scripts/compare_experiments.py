@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,6 +16,32 @@ from simulator.metrics import export_experiment_results
 from simulator.metrics import generate_experiment_comparison_visuals
 from simulator.metrics import generate_experiment_multi_comparison_visuals
 from simulator.metrics import generate_experiment_three_way_comparison_visuals
+
+
+def _parse_dynamic_legacy_options(unknown_args: list[str]) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    experiment_items: list[tuple[str, str]] = []
+    label_items: dict[str, str] = {}
+
+    index = 0
+    while index < len(unknown_args):
+        token = unknown_args[index]
+        if re.match(r"^--experiment-[A-Za-z0-9_\-]+$", token):
+            if index + 1 >= len(unknown_args) or unknown_args[index + 1].startswith("--"):
+                raise ValueError(f"Missing value for {token}")
+            suffix = token[len("--experiment-") :]
+            experiment_items.append((suffix, unknown_args[index + 1]))
+            index += 2
+            continue
+        if re.match(r"^--label-[A-Za-z0-9_\-]+$", token):
+            if index + 1 >= len(unknown_args) or unknown_args[index + 1].startswith("--"):
+                raise ValueError(f"Missing value for {token}")
+            suffix = token[len("--label-") :]
+            label_items[suffix] = unknown_args[index + 1]
+            index += 2
+            continue
+        raise ValueError(f"Unknown argument: {token}")
+
+    return experiment_items, label_items
 
 
 def _export_run_result(experiment_file: Path, output_dir: Path):
@@ -61,17 +88,36 @@ def main() -> None:
     parser.add_argument("--label-c", default=None, help="Display label for the third experiment. Defaults to the experiment name.")
     parser.add_argument("--label-d", default=None, help="Display label for the fourth experiment. Defaults to the experiment name.")
     parser.add_argument("--title", default="Experiment Comparison", help="Comparison title prefix.")
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+    dynamic_legacy_experiments, dynamic_legacy_labels = _parse_dynamic_legacy_options(unknown_args)
+
+    if args.experiment and (
+        args.experiment_a
+        or args.experiment_b
+        or args.experiment_c
+        or dynamic_legacy_experiments
+    ):
+        raise ValueError("Do not mix repeated --experiment with legacy --experiment-<suffix> options")
 
     experiment_paths: list[Path]
+    legacy_experiment_keys: list[str] = []
     if args.experiment:
         experiment_paths = [Path(item).resolve() for item in args.experiment]
     else:
-        if not args.experiment_a or not args.experiment_b:
-            raise ValueError("Either provide repeated --experiment options or both --experiment-a and --experiment-b")
-        experiment_paths = [Path(args.experiment_a).resolve(), Path(args.experiment_b).resolve()]
-        if args.experiment_c:
-            experiment_paths.append(Path(args.experiment_c).resolve())
+        legacy_experiment_map: dict[str, str] = {}
+        for suffix, value in (("a", args.experiment_a), ("b", args.experiment_b), ("c", args.experiment_c)):
+            if value:
+                legacy_experiment_map[suffix] = value
+        for suffix, value in dynamic_legacy_experiments:
+            legacy_experiment_map[suffix] = value
+
+        legacy_experiment_keys = list(legacy_experiment_map.keys())
+        experiment_paths = [Path(legacy_experiment_map[suffix]).resolve() for suffix in legacy_experiment_keys]
+
+        if len(experiment_paths) < 2:
+            raise ValueError(
+                "Legacy mode requires at least two experiments. Use --experiment-a/--experiment-b and optional --experiment-<suffix>, or use repeated --experiment"
+            )
     if len(experiment_paths) < 2:
         raise ValueError("At least two experiment files are required")
 
@@ -92,15 +138,19 @@ def main() -> None:
             for index in range(len(experiment_paths))
         ]
     else:
-        labels = [args.label_a or experiment_configs[0].meta.name, args.label_b or experiment_configs[1].meta.name]
-        if len(experiment_paths) >= 3:
-            labels.append(args.label_c or experiment_configs[2].meta.name)
+        legacy_label_map: dict[str, str] = {}
+        for suffix, value in (("a", args.label_a), ("b", args.label_b), ("c", args.label_c), ("d", args.label_d)):
+            if value:
+                legacy_label_map[suffix] = value
+        legacy_label_map.update(dynamic_legacy_labels)
+        labels = [
+            legacy_label_map.get(legacy_experiment_keys[index], experiment_configs[index].meta.name)
+            for index in range(len(experiment_paths))
+        ]
 
     run_dirs = [output_dir / f"run_{index + 1}" for index in range(len(experiment_paths))]
-    runs = [
+    for index in range(len(experiment_paths)):
         _export_run_result(experiment_file=experiment_paths[index], output_dir=run_dirs[index])
-        for index in range(len(experiment_paths))
-    ]
 
     if len(experiment_paths) == 2:
         comparison_outputs = generate_experiment_comparison_visuals(

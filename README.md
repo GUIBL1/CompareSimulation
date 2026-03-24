@@ -56,7 +56,7 @@ simulation/
 
 ## 环境要求
 
-所有 Python 相关操作都必须在 conda 的 networkSimulation 环境下执行。
+所有 Python 相关操作建议在 conda 的 `networkSimulation` 环境下执行。
 
 进入项目目录后，先激活环境：
 
@@ -82,7 +82,7 @@ conda activate networkSimulation
 如需按该清单安装依赖，可执行：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python -m pip install -r requirement.txt
+python -m pip install -r requirement.txt
 ```
 
 ## 快速开始
@@ -102,7 +102,7 @@ conda activate networkSimulation
 
 它会自动完成以下步骤：
 
-- 读取至少四份 experiment 配置（由参数指定）
+- 读取至少两份 experiment 配置（由参数指定）
 - 分别运行所有实验
 - 将原始结果写到同一个输出根目录下的 run_1、run_2、...、run_n
 - 自动生成 comparison_summary.json（participants 多方同屏）和一指标一图的 comparison/metric_plots
@@ -116,8 +116,6 @@ conda activate networkSimulation
     --output-dir <output-dir> \
     --experiment <exp1.yaml> \
     --experiment <exp2.yaml> \
-    --experiment <exp3.yaml> \
-    --experiment <exp4.yaml> \
     [--experiment <expN.yaml> ...] \
     [--label <label1> --label <label2> ...]
 ```
@@ -142,7 +140,6 @@ results/<your-compare-dir>/
 ├── run_1/
 ├── run_2/
 ├── run_3/
-├── run_4/
 ├── ...
 └── comparison/
     ├── comparison_summary.json
@@ -165,8 +162,17 @@ results/<your-compare-dir>/
 - comparison/metric_plots/*.png
 - run_1/summary.json
 - run_2/summary.json
-- run_3/summary.json
-- run_4/summary.json
+- run_3/summary.json（若有）
+- run_n/summary.json（若有）
+
+## 脚本入口说明
+
+当前 `scripts/` 目录包含两个直接入口：
+
+- `compare_experiments.py`：运行并对比多个实验。
+    - 方式 1（推荐）：重复传 `--experiment` / `--label`。
+    - 方式 2（legacy）：`--experiment-a --experiment-b ...`，并支持扩展后缀形式 `--experiment-<suffix>`、`--label-<suffix>`。
+    - 两种方式都按“实际给定的实验个数”执行对比，最少 2 个。
 
 comparison_summary.json 中会写出每个指标的 display_name、chart_type，以及 participants 多侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
 

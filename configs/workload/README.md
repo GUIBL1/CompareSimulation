@@ -2,6 +2,13 @@
 
 本目录存放统一工作负载输入。CRUX 与 TECCL 都读取同一种 workload 结构，不允许分别维护两套数据规模定义。
 
+## 当前示例 workload 文件
+
+- `generated_workload.yaml`
+- `inter_dc_heavy_workload.yaml`
+- `inter_dc_broadcast_workload.yaml`
+- `inter_dc_p2p_workload.yaml`
+
 本目录还提供了一个交互式生成脚本：`generate_workload.py`。
 
 它会先读取用户指定的 topology YAML，从 `nodes.explicit_nodes` 中提取所有 `node_type: gpu` 的 `node_id`，再生成 workload YAML。
@@ -16,7 +23,7 @@
 基本用法：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python configs/workload/generate_workload.py
+python configs/workload/generate_workload.py
 ```
 
 脚本会交互询问：
@@ -39,8 +46,8 @@
 也可以通过参数预填一部分输入：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python configs/workload/generate_workload.py \
-  --topology-file configs/topology/inter_dc_triple_fabric_topology.yaml \
+python configs/workload/generate_workload.py \
+  --topology-file configs/topology/inter_dc_triple_topology.yaml \
   --output-file configs/workload/generated_from_triple.yaml \
   --mode 2 \
   --simulation-round-mode 2 \

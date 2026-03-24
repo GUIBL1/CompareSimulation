@@ -247,7 +247,7 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 
 它内部调用 scripts/compare_experiments.py，按如下顺序工作：
 
-1. 读取至少四份 experiment YAML（由参数指定）。
+1. 读取至少两份 experiment YAML（由参数指定）。
 2. 分别运行所有实验。
 3. 将原始结果写入同一输出根目录下的 run_1、run_2、...、run_n。
 4. 基于多边结果生成 comparison_summary.json（participants 多侧）和一指标一图输出。
@@ -256,7 +256,7 @@ CRUX 当前仍然没有引入以下 TE-CCL 式语义：
 它的命令格式是：
 
 ```bash
-./run_experiment_compare.sh --output-dir <output-dir> --experiment <exp1.yaml> --experiment <exp2.yaml> --experiment <exp3.yaml> --experiment <exp4.yaml> [--experiment <expN.yaml> ...] [--label <label1> --label <label2> ...] [extra compare_experiments.py args...]
+./run_experiment_compare.sh --output-dir <output-dir> --experiment <exp1.yaml> --experiment <exp2.yaml> [--experiment <expN.yaml> ...] [--label <label1> --label <label2> ...] [extra compare_experiments.py args...]
 ```
 
 其中最常用的额外参数是：
@@ -528,7 +528,7 @@ $$
 为此，当前仓库新增了交互式搜索脚本：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python configs/experiment/search_crossweaver_params.py
+python configs/experiment/search_crossweaver_params.py
 ```
 
 脚本会：
