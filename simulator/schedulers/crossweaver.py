@@ -552,6 +552,12 @@ class CrossWeaverScheduler(Scheduler):
                 "wcmp_weights": {},
                 "iterations": 0,
                 "max_violation": 0.0,
+                "constraint_residuals": {
+                    "flow_conservation_residual_by_pair_gbps": {},
+                    "flow_conservation_residual_by_pair_mb_per_ms": {},
+                    "capacity_residual_by_link_gbps": {},
+                    "capacity_max_positive_violation_gbps": 0.0,
+                },
             }
 
         current_max_paths = max(1, int(self.stage2_initial_max_paths))

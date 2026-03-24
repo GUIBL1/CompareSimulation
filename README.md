@@ -1,85 +1,83 @@
 # 联合仿真系统
 
-本项目在同一套 Python 离散事件仿真底座中实现并对比两类调度策略：
-
-- CRUX：job-level 的路径与优先级调度
-- TE-CCL：chunk/epoch 驱动的集合通信调度
-
-项目目标不是直接复现论文中的所有数值，而是构建一个可运行、可对比、可归因的统一实验平台，使两类算法在相同拓扑、相同链路参数、相同工作负载和相同指标口径下进行公平比较。
+本项目在同一套 Python 离散事件仿真底座中实现并对比多种调度策略，核心对比对象为：
+- CRUX
+- TE-CC
+- ECMP 
+- CrossWeaver
 
 ## 当前能力
 
 - 支持 topology、workload、experiment 三类 YAML 配置输入
-- 支持 generated 和 explicit 两种拓扑构建方式
-- 支持统一工作负载模型，供 CRUX 和 TE-CCL 共用
-- 支持最小离散事件执行器、链路共享和结果导出
-- 支持按 paper/crux.md 重构后的 CRUX：GPU intensity、priority assignment、争用 DAG、优先级压缩与 priority-aware runtime
-- 支持按 paper/teccl.md 重构后的 TE-CCL 时间展开 MILP 主路径，正式求解后端为 HiGHS
-- 支持 TE-CCL 的 GPU 副本持久转发语义（GPU 发送不扣减副本占有，U 仅用于可发送性门控）
-- 支持最小端到端实验
-- 支持公平对比矩阵配置与枚举
-- 支持结果归因报告与交接报告生成
-- 支持分离导出 TE-CCL 的模型构建时间、求解时间、通信执行时间和端到端时间
-- 支持分离导出 CRUX 的路径/优先级构建时间、通信执行时间和端到端时间
+- 支持 generated 与 explicit 两种拓扑构建方式
+- 支持统一工作负载语义（CRUX / TE-CCL / ECMP / CrossWeaver 共用）
+- 支持离散事件执行器、链路共享和统一结果导出
+- 支持 CRUX（intensity、priority assignment、contention DAG、priority compression、priority-aware runtime）
+- 支持 TE-CCL 时间展开 MILP 主路径（HiGHS 后端）
+- 支持 TE-CCL 的 GPU 副本持久化转发语义（GPU 发送不扣减副本占有）
+- 支持 ECMP 基线调度（stable_per_flow 或 round_robin）
+- 支持 CrossWeaver 两阶段调度及参数搜索
+- 支持多实验标准化对比：2 方 / 3 方 / N 方
 
 ## 目录结构
 
 ```text
-simulation/
+CompareSimulation/
 ├── README.md
-├── plan.md
-├── progress.md
-├── prompt.md
-├── handoff.md
-├── feature_list.json
+├── EXPLAN.md
+├── requirement.txt
+├── run_experiment_compare.sh
 ├── configs/
 │   ├── topology/
 │   ├── workload/
 │   └── experiment/
 ├── simulator/
 │   ├── config/
+│   ├── core/
 │   ├── topology/
 │   ├── workload/
-│   ├── core/
 │   ├── schedulers/
 │   ├── metrics/
 │   └── experiment/
+├── scripts/
+│   └── compare_experiments.py
+├── paper/
+├── reference_topology/
 └── results/
 ```
 
 关键文件：
 
-- README.md、explan.md：项目说明与解释
-- configs/workload/XXX.yaml：流量文件
-- configs/topology/XXX.yaml：拓扑文件
-- configs/experiment/XXX.yaml：实验文件
+- `README.md`、`EXPLAN.md`：项目说明与实现解释
+- `configs/topology/*.yaml`：拓扑配置
+- `configs/workload/*.yaml`：工作负载配置
+- `configs/experiment/*.yaml`：实验配置
+- `run_experiment_compare.sh`：标准化多实验对比入口
+- `scripts/compare_experiments.py`：对比执行与可视化生成主入口
 
 ## 环境要求
 
-所有 Python 相关操作建议在 conda 的 `networkSimulation` 环境下执行。
-
-进入项目目录后，先激活环境：
+建议所有 Python 操作都在 conda 环境 `networkSimulation` 下执行。
 
 ```bash
-cd /home/code/simulation
+cd /home/inspur-02/CompareSimulation
 conda activate networkSimulation
 ```
 
-如果你需要显式使用该环境中的 Python，可使用：
+如需显式使用该环境 Python：
 
 ```bash
-/home/code/miniconda3/envs/networkSimulation/bin/python
+/home/inspur-02/.conda/envs/networkSimulation/bin/python
 ```
+
+补充：`run_experiment_compare.sh` 内部已固定使用上述 Python 解释器。
 
 ## Python 依赖版本清单
 
-项目根目录新增了依赖版本文件：
+项目根目录依赖文件：
 
 - `requirement.txt`
-
-该文件记录了当前项目代码实际使用到的第三方 Python 包及其版本（基于 `networkSimulation` 环境扫描生成）。
-
-如需按该清单安装依赖，可执行：
+安装方式：
 
 ```bash
 python -m pip install -r requirement.txt
@@ -87,154 +85,164 @@ python -m pip install -r requirement.txt
 
 ## 快速开始
 
-建议第一次接手时按以下顺序阅读：
+建议首次接手顺序：
 
-1. explan.md 与 README.md
-2. configs 中与你要运行的实验直接相关的配置文件
+1. 阅读 `README.md` 与 `EXPLAN.md`
+2. 阅读目标实验对应的 `configs/topology/*.yaml`、`configs/workload/*.yaml`、`configs/experiment/*.yaml`
+3. 使用 `run_experiment_compare.sh` 跑最小对比
 
 ## 如何运行实验
 
-###  使用标准化对比脚本 run_experiment_compare.sh
+### 使用标准化对比脚本 run_experiment_compare.sh（推荐）
 
-主目录下的 run_experiment_compare.sh 是当前推荐的对比入口。
+该脚本会自动：
 
-这个脚本内部固定使用 networkSimulation 环境中的 Python 解释器，因此即使不手工写出完整 Python 路径，也会在同一解释器口径下运行 compare 流程。为了避免环境变量或依赖歧义，仍然建议先执行 conda activate networkSimulation。
+- 接收至少两个 experiment 配置
+- 依次执行并输出到 `run_1 ... run_n`
+- 生成 `comparison/comparison_summary.json`
+- 生成 `comparison/metric_plots/*.png`
 
-它会自动完成以下步骤：
 
-- 读取至少两份 experiment 配置（由参数指定）
-- 分别运行所有实验
-- 将原始结果写到同一个输出根目录下的 run_1、run_2、...、run_n
-- 自动生成 comparison_summary.json（participants 多方同屏）和一指标一图的 comparison/metric_plots
-- 写出 comparison_manifest.json，记录输入配置、显示标签和输出位置
-
-基本命令格式：
+命令格式（推荐）：
 
 ```bash
 conda activate networkSimulation
 ./run_experiment_compare.sh \
-    --output-dir <output-dir> \
-    --experiment <exp1.yaml> \
-    --experiment <exp2.yaml> \
-    [--experiment <expN.yaml> ...] \
-    [--label <label1> --label <label2> ...]
+  --output-dir <output-dir> \
+  --experiment <exp1.yaml> \
+  --experiment <exp2.yaml> \
+  [--experiment <expN.yaml> ...] \
+  [--label <label1> --label <label2> ...] \
+  [--title "<compare-title>"]
 ```
 
-例如，对比 triple 拓扑下的 ECMP、CRUX、TE-CCL 与 CrossWeaver：
+位置参数模式（最后一个参数为输出目录）：
+
+```bash
+./run_experiment_compare.sh <exp1.yaml> <exp2.yaml> [<expN.yaml> ...] <output-dir>  [--label <label1> --label <label2> ...] [--title "<compare-title>"]
+```
+
+标签规则：
+
+- `--label` 按顺序与 experiment 对齐
+- 标签不足时回退为 experiment 的 `meta.name`
+- 标签多于 experiment 数量时，多余标签会被忽略
+
+示例（四方对比）：
 
 ```bash
 conda activate networkSimulation
 ./run_experiment_compare.sh \
-        --output-dir results/inter_dc_triple_parallel_fourway \
-        --experiment configs/experiment/inter_dc_triple_parallel_heavy_ecmp.yaml \
-        --experiment configs/experiment/inter_dc_triple_parallel_heavy_crux.yaml \
-        --experiment configs/experiment/inter_dc_triple_parallel_heavy_teccl.yaml \
-        --experiment configs/experiment/inter_dc_triple_parallel_heavy_crossweaver.yaml \
-        --label ECMP --label CRUX --label TECCL --label CrossWeaver
+  --output-dir results/inter_dc_triple_fourway \
+  --experiment configs/experiment/inter_dc_triple_heavy_ecmp.yaml \
+  --experiment configs/experiment/inter_dc_triple_heavy_crux.yaml \
+  --experiment configs/experiment/inter_dc_triple_heavy_teccl.yaml \
+  --experiment configs/experiment/inter_dc_triple_heavy_crossweaver.yaml \
+  --label ECMP --label CRUX --label TECCL --label CrossWeaver \
+  --title "Inter-DC Triple Heavy"
 ```
-输出目录结构通常如下：
+或者：
 
-```text
-results/<your-compare-dir>/
-├── comparison_manifest.json
-├── run_1/
-├── run_2/
-├── run_3/
-├── ...
-└── comparison/
-    ├── comparison_summary.json
-    └── metric_plots/
-        ├── completion_time_ms.png
-        ├── job_completion_ratio.png
-        ├── bottleneck_link_peak_utilization.png
-        ├── bottleneck_link_average_utilization.png
-        ├── bottleneck_busy_time_ms.png
-        ├── queue_backlog_percentiles_mb.png
-        ├── flow_completion_time_percentiles_ms.png
-        ├── job_completion_time_percentiles_ms.png
-        ├── completion_time_spread_ms.png
-        └── congestion_duration_ms.png
+```bash
+conda activate networkSimulation
+./run_experiment_compare.sh \
+  configs/experiment/inter_dc_triple_heavy_ecmp.yaml \
+  configs/experiment/inter_dc_triple_heavy_crux.yaml \
+  configs/experiment/inter_dc_triple_heavy_teccl.yaml \
+  configs/experiment/inter_dc_triple_heavy_crossweaver.yaml \
+  results/inter_dc_triple_fourway \
+  --label ECMP --label CRUX --label TECCL --label CrossWeaver \
+  --title "Inter-DC Triple Heavy"
 ```
-
-其中最值得优先查看的是：
-
-- comparison/comparison_summary.json
-- comparison/metric_plots/*.png
-- run_1/summary.json
-- run_2/summary.json
-- run_3/summary.json（若有）
-- run_n/summary.json（若有）
 
 ## 脚本入口说明
 
-当前 `scripts/` 目录包含两个直接入口：
+当前直接入口脚本：
 
-- `compare_experiments.py`：运行并对比多个实验。
-    - 方式 1（推荐）：重复传 `--experiment` / `--label`。
-    - 方式 2（legacy）：`--experiment-a --experiment-b ...`，并支持扩展后缀形式 `--experiment-<suffix>`、`--label-<suffix>`。
-    - 两种方式都按“实际给定的实验个数”执行对比，最少 2 个。
+- `run_experiment_compare.sh`：标准化 compare 包装脚本（推荐）
+- `scripts/compare_experiments.py`：核心对比入口
+  - 方式 1（推荐）：重复 `--experiment` / `--label`
+  - 方式 2（legacy）：`--experiment-a --experiment-b ...`，并支持 `--experiment-<suffix>`、`--label-<suffix>`
+  - 最少需要 2 个实验
 
-comparison_summary.json 中会写出每个指标的 display_name、chart_type，以及 participants 多侧实验的汇总值，适合后续继续做自动报告或 notebook 分析。
+配置目录下的辅助脚本（可选）：
 
+- `configs/experiment/scan_teccl_feasibility.py`：TE-CCL 可行性扫描
+- `configs/experiment/search_crossweaver_params.py`：CrossWeaver 参数搜索
 
 ## 结果文件说明
 
-每次通过 ExperimentRunner.export_results 运行实验后，结果目录中通常会包含以下文件：
+每次实验通过 `export_experiment_results` 导出，文件受 `metrics` 开关控制：
 
-- summary.json：聚合指标与每次 repetition 摘要
-- summary.csv：便于表格处理的摘要指标
-- link_load_trace.csv：链路负载时间序列
-- link_load_trace.json：链路负载时间序列的 JSON 版本
-- flow_trace.csv：flow 级执行轨迹
-- schedule_history.json：每轮调度历史
-- scheduler_debug.json：调度器内部调试状态
-- crux_scheduler_stats.json：当 scheduler.type=crux 时，额外导出完整 CRUX profiling、图规模、cut 统计与执行增益
-- teccl_solver_stats.json：当 scheduler.type=teccl 时，额外导出完整求解统计与模型规模
+- `export_json=true` 时：
+  - `summary.json`
+  - `scheduler_debug.json`
+  - `link_load_trace.json`
+  - `crux_scheduler_stats.json`（仅 CRUX）
+  - `teccl_solver_stats.json`（仅 TE-CCL）
+- `export_csv=true` 时：
+  - `summary.csv`
+  - `link_load_trace.csv`
+- `export_trace=true` 时：
+  - `flow_trace.csv`
+  - `schedule_history.json`
 
-如果是通过 run_experiment_compare.sh 运行标准化对比，则在对比输出根目录下还会额外出现：
+通过 `run_experiment_compare.sh` 执行对比时，还会在输出根目录额外生成：
 
-- comparison_manifest.json：标准化 compare 入口的运行清单
-- comparison/comparison_summary.json：对比指标汇总
-- comparison/metric_plots/*.png：一指标一图的对比结果
+- `comparison_manifest.json`
+- `comparison/comparison_summary.json`
+- `comparison/metric_plots/*.png`
 
-对于当前的 CRUX 实现，summary.json 与 crux_scheduler_stats.json 中最需要优先区分的是以下几个时间字段：
+当前默认主图指标包括：
 
-- crux_scheduler_wall_time_ms：CRUX 从 intensity/path selection 到 DAG 压缩结束的总构建耗时
-- crux_path_selection_time_ms：路径选择耗时
-- crux_priority_assignment_time_ms：priority assignment 耗时
-- crux_priority_compression_time_ms：争用 DAG 构建、拓扑序采样与 DP 压缩耗时
-- crux_communication_execution_time_ms：按压缩后硬件优先级执行通信的耗时
-- crux_end_to_end_time_ms：构建耗时与执行耗时之和
+- `completion_time_ms`
+- `planning_time_ms`
+- `communication_execution_time_ms`
+- `job_completion_ratio`
+- `bottleneck_link_peak_utilization`
+- `bottleneck_link_average_utilization`
+- `bottleneck_busy_time_ms`
+- `queue_backlog_percentiles_mb`
+- `flow_completion_time_percentiles_ms`
+- `job_completion_time_percentiles_ms`
+- `completion_time_spread_ms`
+- `congestion_duration_ms`
 
-这组字段用于直接回答：CRUX 的收益来自建模/压缩，还是来自 priority-aware execution。
+CRUX 时间口径（`summary.json` / `crux_scheduler_stats.json`）：
 
-对于当前的 TE-CCL 实现，summary.json 与 teccl_solver_stats.json 中最需要优先区分的是以下几个时间字段：
+- `crux_scheduler_wall_time_ms`
+- `crux_path_selection_time_ms`
+- `crux_priority_assignment_time_ms`
+- `crux_priority_compression_time_ms`
+- `crux_communication_execution_time_ms`
+- `crux_end_to_end_time_ms`
 
-- completion_time_ms：runtime 执行结束时的完成时间，可视为通信执行阶段的完成时间基线
-- teccl_model_build_time_ms：时间展开 MILP 的建模耗时
-- teccl_solve_only_time_ms：HiGHS optimize 本身的耗时
-- teccl_solver_wall_time_ms：TE-CCL 从建模开始到求解结束的总墙钟耗时
-- teccl_communication_execution_time_ms：已求得计划在 runtime 中执行通信的耗时
-- teccl_end_to_end_time_ms：求解总耗时与通信执行耗时之和
+TE-CCL 时间口径（`summary.json` / `teccl_solver_stats.json`）：
 
-这组字段用于直接回答：TE-CCL 慢，是慢在求解还是慢在通信。
+- `teccl_model_build_time_ms`
+- `teccl_solve_only_time_ms`
+- `teccl_solver_wall_time_ms`
+- `teccl_communication_execution_time_ms`
+- `teccl_end_to_end_time_ms`
 
-当前 comparison/metric_plots/completion_time_ms.png 会把 CRUX 和 TE-CCL 都画成“通信执行时间 + 规划/求解时间”的堆叠柱，便于直接对齐端到端口径。
+CrossWeaver 时间口径（`summary.json`）：
 
-## 公平对比规则
+- `crossweaver_stage1a_time_ms`
+- `crossweaver_stage1b_time_ms`
+- `crossweaver_stage2_time_ms`
+- `crossweaver_scheduler_wall_time_ms`
+- `crossweaver_communication_execution_time_ms`
+- `crossweaver_end_to_end_time_ms`
 
-CRUX 与 TE-CCL 做比较时，下面这些公共字段必须保持一致：
+## 公平对比规则（核心）
 
-- topology_file
-- workload_file
-- random_seed
-- simulation.max_time_ms
-- simulation.bandwidth_sharing_model
-- metrics.export_json
-- metrics.export_csv
-- metrics.export_trace
+比较不同调度器时，建议保持以下字段一致：
 
-允许变化的仅是算法私有参数，例如：
+- `inputs.topology_file`
+- `inputs.workload_file`
+- `simulation.random_seed`
+- `simulation.max_time_ms`
+- `simulation.bandwidth_sharing_model`
+- `metrics.export_json / export_csv / export_trace`
 
-- CRUX：hardware_priority_count、candidate_path_limit、topological_order_sample_count、intensity_definition_mode、priority_factor_mode、enable_priority_aware_bandwidth
-- TE-CCL：epoch_size_ms、solver_backend、max_epoch_count（兼容 planning_horizon_epochs）、max_solver_time_ms、mip_gap、solver_threads、objective_mode、switch_buffer_policy
+仅调整 scheduler 私有参数（如 CRUX 的 priority 参数、TE-CCL 的 epoch/solver 参数、CrossWeaver 的 stage 参数、ECMP 的 `stable_per_flow`）。

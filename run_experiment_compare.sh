@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="/home/code/miniconda3/envs/networkSimulation/bin/python"
+PYTHON_BIN="/home/inspur-02/.conda/envs/networkSimulation/bin/python"
 
 usage() {
   echo "Usage:"
-  echo "  $0 --output-dir <dir> --experiment <exp1.yaml> --experiment <exp2.yaml> --experiment <exp3.yaml> --experiment <exp4.yaml> [--experiment <expN.yaml> ...] [--label <label1> --label <label2> ...] [extra compare_experiments.py args...]"
-  echo "  $0 <exp1.yaml> <exp2.yaml> <exp3.yaml> <exp4.yaml> <output-dir> [extra compare_experiments.py args...]"
+  echo "  $0 --output-dir <dir> --experiment <exp1.yaml> --experiment <exp2.yaml> [--experiment <expN.yaml> ...] [--label <label1> --label <label2> ...] [extra compare_experiments.py args...]"
+  echo "  $0 <exp1.yaml> <exp2.yaml> [<expN.yaml> ...] <output-dir> [-- extra compare_experiments.py args...]"
 }
 
 experiments=()
@@ -16,14 +16,41 @@ extra_args=()
 output_dir=""
 
 if [[ $# -gt 0 && "$1" != --* ]]; then
-  if [[ $# -lt 5 ]]; then
+  positional=()
+  while [[ $# -gt 0 && "$1" != --* ]]; do
+    positional+=("$1")
+    shift
+  done
+
+  if [[ ${#positional[@]} -lt 3 ]]; then
     usage
     exit 1
   fi
-  experiments+=("$1" "$2" "$3" "$4")
-  output_dir="$5"
-  shift 5
-  extra_args+=("$@")
+
+  output_index=$((${#positional[@]} - 1))
+  output_dir="${positional[$output_index]}"
+  for ((i=0; i<output_index; i++)); do
+    experiments+=("${positional[$i]}")
+  done
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --label)
+        [[ $# -ge 2 ]] || { echo "Missing value for --label"; exit 1; }
+        labels+=("$2")
+        shift 2
+        ;;
+      --)
+        shift
+        extra_args+=("$@")
+        break
+        ;;
+      *)
+        extra_args+=("$1")
+        shift
+        ;;
+    esac
+  done
 else
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -59,8 +86,8 @@ else
   done
 fi
 
-if [[ ${#experiments[@]} -lt 4 ]]; then
-  echo "At least 4 experiments are required."
+if [[ ${#experiments[@]} -lt 2 ]]; then
+  echo "At least 2 experiments are required."
   usage
   exit 1
 fi
