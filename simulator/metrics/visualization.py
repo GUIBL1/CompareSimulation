@@ -38,6 +38,7 @@ def generate_experiment_comparison_visuals(
     label_a: str | None = None,
     label_b: str | None = None,
     title: str = "Experiment Comparison",
+    smooth_ecdf_curves: bool = False,
 ) -> dict[str, Any]:
     dir_a = Path(result_a_dir).resolve()
     dir_b = Path(result_b_dir).resolve()
@@ -71,6 +72,7 @@ def generate_experiment_comparison_visuals(
             label_b=label_b,
             output_path=plot_path,
             title=title,
+            smooth_ecdf_curves=smooth_ecdf_curves,
         )
         plot_outputs[spec["id"]] = str(plot_path)
 
@@ -102,6 +104,7 @@ def generate_crux_teccl_comparison_visuals(
     teccl_result_dir: str | Path,
     output_dir: str | Path,
     title: str = "CRUX vs TE-CCL Comparison",
+    smooth_ecdf_curves: bool = False,
 ) -> dict[str, Any]:
     return generate_experiment_comparison_visuals(
         result_a_dir=crux_result_dir,
@@ -110,6 +113,7 @@ def generate_crux_teccl_comparison_visuals(
         label_a="CRUX",
         label_b="TE-CCL",
         title=title,
+        smooth_ecdf_curves=smooth_ecdf_curves,
     )
 
 
@@ -122,12 +126,14 @@ def generate_experiment_three_way_comparison_visuals(
     label_b: str | None = None,
     label_c: str | None = None,
     title: str = "Experiment Comparison",
+    smooth_ecdf_curves: bool = False,
 ) -> dict[str, Any]:
     return generate_experiment_multi_comparison_visuals(
         result_dirs=[result_a_dir, result_b_dir, result_c_dir],
         output_dir=output_dir,
         labels=[label_a, label_b, label_c],
         title=title,
+        smooth_ecdf_curves=smooth_ecdf_curves,
     )
 
 
@@ -136,6 +142,7 @@ def generate_experiment_multi_comparison_visuals(
     output_dir: str | Path,
     labels: list[str | None] | None = None,
     title: str = "Experiment Comparison",
+    smooth_ecdf_curves: bool = False,
 ) -> dict[str, Any]:
     resolved_dirs = [Path(path).resolve() for path in result_dirs]
     if len(resolved_dirs) < 2:
@@ -173,6 +180,7 @@ def generate_experiment_multi_comparison_visuals(
             participants=participants,
             output_path=plot_path,
             title=title,
+            smooth_ecdf_curves=smooth_ecdf_curves,
         )
         plot_outputs[spec["id"]] = str(plot_path)
 
@@ -432,6 +440,7 @@ def _render_metric_plot(
     label_b: str,
     output_path: Path,
     title: str,
+    smooth_ecdf_curves: bool = False,
 ) -> None:
     chart_type = spec["chart_type"]
     if chart_type == "stacked_bar":
@@ -494,6 +503,7 @@ def _render_metric_plot(
             axis_label=spec["axis_label"],
             output_path=output_path,
             title=title,
+            smooth_curve=smooth_ecdf_curves,
         )
         return
     raise ValueError(f"Unsupported chart type: {chart_type}")
@@ -504,6 +514,7 @@ def _render_metric_plot_multi(
     participants: list[dict[str, Any]],
     output_path: Path,
     title: str,
+    smooth_ecdf_curves: bool = False,
 ) -> None:
     chart_type = spec["chart_type"]
     labels = [participant["label"] for participant in participants]
@@ -548,6 +559,7 @@ def _render_metric_plot_multi(
             axis_label=spec["axis_label"],
             output_path=output_path,
             title=title,
+            smooth_curve=smooth_ecdf_curves,
         )
         return
     raise ValueError(f"Unsupported chart type: {chart_type}")
@@ -698,12 +710,13 @@ def _plot_ecdf_metric(
     axis_label: str,
     output_path: Path,
     title: str,
+    smooth_curve: bool = False,
 ) -> None:
     fig, axis = plt.subplots(figsize=(9.5, 5.5))
-    _plot_ecdf_series(axis, samples_a, label_a, "#1f77b4")
-    _plot_ecdf_series(axis, samples_b, label_b, "#d62728")
-    _plot_percentile_markers(axis, percentiles_a, "#1f77b4")
-    _plot_percentile_markers(axis, percentiles_b, "#d62728")
+    _plot_ecdf_series(axis, samples_a, label_a, "#1f77b4", smooth_curve=smooth_curve)
+    _plot_ecdf_series(axis, samples_b, label_b, "#d62728", smooth_curve=smooth_curve)
+    _plot_percentile_markers(axis, percentiles_a, "#1f77b4", samples=samples_a, smooth_curve=smooth_curve)
+    _plot_percentile_markers(axis, percentiles_b, "#d62728", samples=samples_b, smooth_curve=smooth_curve)
     axis.set_title(f"{title} - {metric_name}")
     axis.set_xlabel(axis_label)
     axis.set_ylabel("Cumulative Probability（累计概率）")
@@ -820,12 +833,19 @@ def _plot_ecdf_metric_multi(
     axis_label: str,
     output_path: Path,
     title: str,
+    smooth_curve: bool = False,
 ) -> None:
     fig, axis = plt.subplots(figsize=(9.8, 5.5))
     for index, label in enumerate(labels):
         color = _series_color(index)
-        _plot_ecdf_series(axis, sample_sets[index], label, color)
-        _plot_percentile_markers(axis, percentile_sets[index], color)
+        _plot_ecdf_series(axis, sample_sets[index], label, color, smooth_curve=smooth_curve)
+        _plot_percentile_markers(
+            axis,
+            percentile_sets[index],
+            color,
+            samples=sample_sets[index],
+            smooth_curve=smooth_curve,
+        )
     axis.set_title(f"{title} - {metric_name}")
     axis.set_xlabel(axis_label)
     axis.set_ylabel("Cumulative Probability（累计概率）")
@@ -836,23 +856,106 @@ def _plot_ecdf_metric_multi(
     plt.close(fig)
 
 
-def _plot_ecdf_series(axis: Any, samples: list[float], label: str, color: str) -> None:
+def _plot_ecdf_series(axis: Any, samples: list[float], label: str, color: str, smooth_curve: bool = False) -> None:
     if not samples:
         axis.plot([], [], label=f"{label} (no completed samples)")
         return
     sorted_samples = sorted(samples)
     y_values = [(index + 1) / len(sorted_samples) for index in range(len(sorted_samples))]
+    if smooth_curve and len(sorted_samples) >= 3:
+        x_values, cdf_values = _build_smoothed_cdf_curve(sorted_samples)
+        axis.plot(x_values, cdf_values, label=label, color=color, linewidth=2.0)
+        return
     axis.step(sorted_samples, y_values, where="post", label=label, color=color)
 
 
-def _plot_percentile_markers(axis: Any, percentiles: dict[str, float], color: str) -> None:
+def _build_smoothed_cdf_curve(sorted_samples: list[float], points: int = 240) -> tuple[list[float], list[float]]:
+    count = len(sorted_samples)
+    if count == 0:
+        return [], []
+    if count == 1:
+        return [sorted_samples[0]], [1.0]
+
+    sample_min = sorted_samples[0]
+    sample_max = sorted_samples[-1]
+    spread = max(sample_max - sample_min, EPSILON)
+    avg = sum(sorted_samples) / count
+    variance = sum((value - avg) ** 2 for value in sorted_samples) / max(count - 1, 1)
+    std = math.sqrt(max(variance, 0.0))
+
+    bandwidth = 1.06 * std * (count ** (-1.0 / 5.0)) if std > EPSILON else 0.0
+    if bandwidth <= EPSILON:
+        bandwidth = max(spread / 25.0, EPSILON)
+
+    left = sample_min - 2.0 * bandwidth
+    right = sample_max + 2.0 * bandwidth
+    if right <= left:
+        right = left + spread
+
+    if points < 32:
+        points = 32
+    step = (right - left) / (points - 1)
+    x_values = [left + index * step for index in range(points)]
+
+    sqrt_two = math.sqrt(2.0)
+    cdf_values: list[float] = []
+    for x in x_values:
+        total = 0.0
+        for sample in sorted_samples:
+            z = (x - sample) / bandwidth
+            total += 0.5 * (1.0 + math.erf(z / sqrt_two))
+        cdf = total / count
+        cdf_values.append(min(1.0, max(0.0, cdf)))
+
+    cdf_values[0] = 0.0
+    cdf_values[-1] = 1.0
+    for index in range(1, len(cdf_values)):
+        if cdf_values[index] < cdf_values[index - 1]:
+            cdf_values[index] = cdf_values[index - 1]
+    return x_values, cdf_values
+
+
+def _plot_percentile_markers(
+    axis: Any,
+    percentiles: dict[str, float],
+    color: str,
+    samples: list[float] | None = None,
+    smooth_curve: bool = False,
+) -> None:
     y_positions = {"P50": 0.50, "P95": 0.95, "P99": 0.99}
+    if smooth_curve and samples and len(samples) >= 3:
+        x_values, cdf_values = _build_smoothed_cdf_curve(sorted(samples))
+        for label, y_pos in y_positions.items():
+            x_value = _inverse_cdf_from_curve(x_values, cdf_values, y_pos)
+            axis.scatter([x_value], [y_pos], color=color, s=35, zorder=4)
+            axis.annotate(label, (x_value, y_pos), xytext=(6, 0), textcoords="offset points", color=color, va="center")
+        return
+
     for label, y_pos in y_positions.items():
         value = float(percentiles.get(label, 0.0) or 0.0)
         if value <= 0.0:
             continue
         axis.scatter([value], [y_pos], color=color, s=35, zorder=4)
         axis.annotate(label, (value, y_pos), xytext=(6, 0), textcoords="offset points", color=color, va="center")
+
+
+def _inverse_cdf_from_curve(x_values: list[float], cdf_values: list[float], target_prob: float) -> float:
+    if not x_values or not cdf_values:
+        return 0.0
+    if target_prob <= cdf_values[0]:
+        return x_values[0]
+    for index in range(1, len(cdf_values)):
+        current_cdf = cdf_values[index]
+        if current_cdf < target_prob:
+            continue
+        prev_cdf = cdf_values[index - 1]
+        prev_x = x_values[index - 1]
+        current_x = x_values[index]
+        if abs(current_cdf - prev_cdf) <= EPSILON:
+            return current_x
+        ratio = (target_prob - prev_cdf) / (current_cdf - prev_cdf)
+        return prev_x + ratio * (current_x - prev_x)
+    return x_values[-1]
 
 
 def _compute_comparison_metrics(

@@ -160,6 +160,7 @@ def main() -> None:
             label_a=labels[0],
             label_b=labels[1],
             title=args.title,
+            smooth_ecdf_curves=True,
         )
     elif len(experiment_paths) == 3:
         comparison_outputs = generate_experiment_three_way_comparison_visuals(
@@ -171,6 +172,7 @@ def main() -> None:
             label_b=labels[1],
             label_c=labels[2],
             title=args.title,
+            smooth_ecdf_curves=True,
         )
     else:
         comparison_outputs = generate_experiment_multi_comparison_visuals(
@@ -178,6 +180,7 @@ def main() -> None:
             output_dir=comparison_dir,
             labels=labels,
             title=args.title,
+            smooth_ecdf_curves=True,
         )
     comparison_summary = json.loads(Path(comparison_outputs["summary_json"]).read_text(encoding="utf-8"))
 
