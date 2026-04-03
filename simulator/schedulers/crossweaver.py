@@ -87,8 +87,16 @@ class CrossWeaverScheduler(Scheduler):
     _prev_stage2_t_bracket: tuple[float, float] | None = field(default=None, init=False, repr=False)
     _prev_wcmp_weights: dict[tuple[str, str], list[tuple[list[str], float]]] = field(default_factory=dict, init=False, repr=False)
     _current_link_by_id: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
-    _path_link_id_cache: dict[tuple[str, ...], list[str]] = field(default_factory=dict, init=False, repr=False)
+    _path_link_id_cache: dict[tuple[str, ...], tuple[str, ...]] = field(default_factory=dict, init=False, repr=False)
     _runtime_link_state_map: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    _node_dc_cache: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _node_tor_cache: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _intra_domain_paths_cache: dict[tuple[str, str, int], list[list[str]]] = field(default_factory=dict, init=False, repr=False)
+    _inter_dc_hop_count_cache: dict[tuple[str, ...], int] = field(default_factory=dict, init=False, repr=False)
+    _dci_link_ids_cache: dict[tuple[str, ...], tuple[str, ...]] = field(default_factory=dict, init=False, repr=False)
+    _dci_path_latency_cache: dict[tuple[str, ...], float] = field(default_factory=dict, init=False, repr=False)
+    _inv_bandwidth_by_link: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    _switch_nodes_cache: set[str] = field(default_factory=set, init=False, repr=False)
 
     def on_workload_arrival(self, job: UnifiedJob, runtime_state: RuntimeState) -> None:
         return None
@@ -105,6 +113,21 @@ class CrossWeaverScheduler(Scheduler):
         link_by_arc = self._build_link_lookup(runtime_state)
         self._current_link_by_id = self._link_id_map(link_by_arc)
         self._path_link_id_cache = {}
+        self._node_dc_cache = {}
+        self._node_tor_cache = {}
+        self._intra_domain_paths_cache = {}
+        self._inter_dc_hop_count_cache = {}
+        self._dci_link_ids_cache = {}
+        self._dci_path_latency_cache = {}
+        self._inv_bandwidth_by_link = {
+            link_id: 1.0 / max(float(link.bandwidth_gbps), 1e-9)
+            for link_id, link in self._current_link_by_id.items()
+        }
+        self._switch_nodes_cache = {
+            node_id
+            for node_id, node in runtime_state.topology.nodes.items()
+            if node.node_type == "switch"
+        }
         self._refresh_observed_queue_wait(runtime_state, link_by_arc)
         flow_demands, intra_tor_demands = self._build_demands(runtime_state)
         cross_flow_demands = [demand for demand in flow_demands if demand.dc_source != demand.dc_destination]
@@ -956,6 +979,20 @@ class CrossWeaverScheduler(Scheduler):
             for link_id, value in initial_lambda_by_link.items():
                 lambda_by_link[link_id] = max(0.0, float(value))
 
+        path_intra_link_ids: dict[tuple[tuple[str, str], int], tuple[str, ...]] = {}
+        link_lookup = self._current_link_by_id
+        for demand in intra_tor_demands:
+            key = (demand.tor_source, demand.tor_destination)
+            candidate_paths = tor_paths.get(key, [])
+            for index, path in enumerate(candidate_paths):
+                intra_link_ids: list[str] = []
+                for link_id in self._path_link_ids(path, link_by_arc):
+                    link = link_lookup.get(link_id)
+                    if link is None or bool(link.attributes.get("inter_dc", False)):
+                        continue
+                    intra_link_ids.append(link_id)
+                path_intra_link_ids[(key, index)] = tuple(intra_link_ids)
+
         path_rate: dict[tuple[tuple[str, str], int], float] = defaultdict(float)
         load_by_link: dict[str, float] = defaultdict(float)
         max_violation = 0.0
@@ -995,22 +1032,19 @@ class CrossWeaverScheduler(Scheduler):
                 else:
                     normalized_weights = [weight / weight_sum for weight in unnormalized_weights]
 
-                for (path_index, path, _), weight in zip(priced_paths, normalized_weights, strict=False):
+                for (path_index, _path, _), weight in zip(priced_paths, normalized_weights, strict=False):
                     allocated_rate = required_rate * weight
                     if allocated_rate <= self.feasibility_tolerance:
                         continue
                     path_rate[(key, path_index)] += allocated_rate
-                    for link_id in self._path_link_ids(path, link_by_arc):
-                        link = self._link_by_id(link_id, link_by_arc)
-                        if bool(link.attributes.get("inter_dc", False)):
-                            continue
+                    for link_id in path_intra_link_ids.get((key, path_index), ()):
                         load_by_link[link_id] += allocated_rate
 
             max_overload = 0.0
             lambda_delta_max = 0.0
             for link_id, cap in residual_capacity_by_link.items():
-                link = self._link_by_id(link_id, link_by_arc)
-                if bool(link.attributes.get("inter_dc", False)):
+                link = link_lookup.get(link_id)
+                if link is not None and bool(link.attributes.get("inter_dc", False)):
                     continue
                 cap_non_negative = max(float(cap), 0.0)
                 load = load_by_link.get(link_id, 0.0)
@@ -1057,11 +1091,7 @@ class CrossWeaverScheduler(Scheduler):
         max_paths: int,
         active_pairs: set[tuple[str, str]] | None = None,
     ) -> dict[tuple[str, str], list[list[str]]]:
-        switch_nodes = {
-            node_id
-            for node_id, node in runtime_state.topology.nodes.items()
-            if node.node_type == "switch"
-        }
+        switch_nodes = self._switch_nodes_cache
 
         pairs = active_pairs
         if pairs is None:
@@ -1103,6 +1133,7 @@ class CrossWeaverScheduler(Scheduler):
             path_candidates,
             key=lambda path: (
                 self._inter_dc_hop_count(path, link_by_arc),
+                self._dci_path_latency_ms(path, link_by_arc),
                 len(path),
                 path,
             ),
@@ -1137,15 +1168,19 @@ class CrossWeaverScheduler(Scheduler):
     ) -> list[str]:
         if not path_candidates:
             return []
+        link_lookup = self._current_link_by_id
+        inv_bw = self._inv_bandwidth_by_link
         best_path: list[str] = []
         best_cost = float("inf")
         for path in path_candidates:
             cost = 0.0
             for link_id in self._path_link_ids(path, link_by_arc):
-                link = self._link_by_id(link_id, link_by_arc)
+                link = link_lookup.get(link_id)
+                if link is None:
+                    continue
                 if not include_inter_dc and bool(link.attributes.get("inter_dc", False)):
                     continue
-                cost += lambda_by_link.get(link_id, 0.0) / max(float(link.bandwidth_gbps), 1e-9)
+                cost += lambda_by_link.get(link_id, 0.0) * inv_bw.get(link_id, 1e9)
             if cost < best_cost:
                 best_cost = cost
                 best_path = list(path)
@@ -1161,14 +1196,18 @@ class CrossWeaverScheduler(Scheduler):
     ) -> list[tuple[int, list[str], float]]:
         if not path_candidates:
             return []
+        link_lookup = self._current_link_by_id
+        inv_bw = self._inv_bandwidth_by_link
         scored_paths: list[tuple[int, list[str], float]] = []
         for index, path in enumerate(path_candidates):
             cost = 0.0
             for link_id in self._path_link_ids(path, link_by_arc):
-                link = self._link_by_id(link_id, link_by_arc)
+                link = link_lookup.get(link_id)
+                if link is None:
+                    continue
                 if not include_inter_dc and bool(link.attributes.get("inter_dc", False)):
                     continue
-                cost += lambda_by_link.get(link_id, 0.0) / max(float(link.bandwidth_gbps), 1e-9)
+                cost += lambda_by_link.get(link_id, 0.0) * inv_bw.get(link_id, 1e9)
             scored_paths.append((index, list(path), cost))
         scored_paths.sort(key=lambda item: (item[2], len(item[1]), item[1]))
         return scored_paths[: max(1, min(int(top_k), len(scored_paths)))]
@@ -1252,6 +1291,10 @@ class CrossWeaverScheduler(Scheduler):
         return None
 
     def _extract_dci_links_from_path(self, path: list[str], link_by_arc: dict[tuple[str, str], Any]) -> list[str]:
+        key = tuple(path)
+        cached = self._dci_link_ids_cache.get(key)
+        if cached is not None:
+            return list(cached)
         link_ids: list[str] = []
         for src, dst in zip(path, path[1:]):
             link = link_by_arc.get((src, dst))
@@ -1259,26 +1302,37 @@ class CrossWeaverScheduler(Scheduler):
                 continue
             if bool(link.attributes.get("inter_dc", False)):
                 link_ids.append(link.link_id)
+        self._dci_link_ids_cache[key] = tuple(link_ids)
         return link_ids
 
-    def _path_link_ids(self, path: list[str], link_by_arc: dict[tuple[str, str], Any]) -> list[str]:
+    def _dci_path_latency_ms(self, path: list[str], link_by_arc: dict[tuple[str, str], Any]) -> float:
+        key = tuple(path)
+        cached = self._dci_path_latency_cache.get(key)
+        if cached is not None:
+            return cached
+        latency_ms = self._path_latency_ms(self._extract_dci_links_from_path(path, link_by_arc), link_by_arc)
+        self._dci_path_latency_cache[key] = latency_ms
+        return latency_ms
+
+    def _path_link_ids(self, path: list[str], link_by_arc: dict[tuple[str, str], Any]) -> tuple[str, ...]:
         key = tuple(path)
         cached = self._path_link_id_cache.get(key)
         if cached is not None:
-            return list(cached)
+            return cached
         link_ids: list[str] = []
         for src, dst in zip(path, path[1:]):
             link = link_by_arc.get((src, dst))
             if link is None:
-                return []
+                return tuple()
             link_ids.append(link.link_id)
-        self._path_link_id_cache[key] = list(link_ids)
-        return link_ids
+        resolved = tuple(link_ids)
+        self._path_link_id_cache[key] = resolved
+        return resolved
 
     def _path_latency_ms(self, dci_link_ids: list[str], link_by_arc: dict[tuple[str, str], Any]) -> float:
         if not dci_link_ids:
             return 0.0
-        by_id = self._link_id_map(link_by_arc)
+        by_id = self._current_link_by_id or self._link_id_map(link_by_arc)
         return sum(float(by_id[link_id].latency_us) / 1000.0 for link_id in dci_link_ids if link_id in by_id)
 
     def _estimate_queue_wait(self, demand: _FlowDemand, link_by_arc: dict[tuple[str, str], Any]) -> float:
@@ -1312,37 +1366,56 @@ class CrossWeaverScheduler(Scheduler):
             self.observed_queue_wait_ms_by_flow[flow.flow_id] = queue_wait_ms
 
     def _inter_dc_hop_count(self, path: list[str], link_by_arc: dict[tuple[str, str], Any]) -> int:
+        key = tuple(path)
+        cached = self._inter_dc_hop_count_cache.get(key)
+        if cached is not None:
+            return cached
         count = 0
         for src, dst in zip(path, path[1:]):
             link = link_by_arc.get((src, dst))
             if link is not None and bool(link.attributes.get("inter_dc", False)):
                 count += 1
+        self._inter_dc_hop_count_cache[key] = count
         return count
 
     def _fallback_path(self, path_candidates: list[list[str]]) -> list[str]:
         return list(path_candidates[0]) if path_candidates else []
 
     def _node_dc(self, runtime_state: RuntimeState, node_id: str) -> str:
+        cached = self._node_dc_cache.get(node_id)
+        if cached is not None:
+            return cached
         node = runtime_state.topology.nodes.get(node_id)
         if node is None:
+            self._node_dc_cache[node_id] = "unknown"
             return "unknown"
-        return str(node.attributes.get("dc", "unknown"))
+        dc = str(node.attributes.get("dc", "unknown"))
+        self._node_dc_cache[node_id] = dc
+        return dc
 
     def _node_tor(self, runtime_state: RuntimeState, node_id: str) -> str:
+        cached = self._node_tor_cache.get(node_id)
+        if cached is not None:
+            return cached
         node = runtime_state.topology.nodes.get(node_id)
         if node is None:
+            self._node_tor_cache[node_id] = ""
             return ""
         if node.node_type == "switch" and str(node.attributes.get("role", "")).lower() == "leaf":
+            self._node_tor_cache[node_id] = node_id
             return node_id
         candidate = str(node.attributes.get("tor_id", ""))
         if candidate:
+            self._node_tor_cache[node_id] = candidate
             return candidate
         for neighbor in runtime_state.topology.adjacency.get(node_id, []):
             neighbor_node = runtime_state.topology.nodes.get(neighbor)
             if neighbor_node is None:
                 continue
             if neighbor_node.node_type == "switch" and str(neighbor_node.attributes.get("role", "")).lower() == "leaf":
+                self._node_tor_cache[node_id] = neighbor
                 return neighbor
+        self._node_tor_cache[node_id] = ""
         return ""
 
     def _enumerate_intra_domain_paths(
@@ -1353,10 +1426,16 @@ class CrossWeaverScheduler(Scheduler):
         dst: str,
         max_paths: int,
     ) -> list[list[str]]:
+        cache_key = (src, dst, int(max_paths))
+        cached = self._intra_domain_paths_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if src == dst:
+            self._intra_domain_paths_cache[cache_key] = [[src]]
             return [[src]]
         domain = self._node_dc(runtime_state, src)
         if domain == "unknown" or self._node_dc(runtime_state, dst) != domain:
+            self._intra_domain_paths_cache[cache_key] = []
             return []
 
         queue: deque[list[str]] = deque([[src]])
@@ -1381,6 +1460,7 @@ class CrossWeaverScheduler(Scheduler):
                 if link is None or bool(link.attributes.get("inter_dc", False)):
                     continue
                 queue.append(path + [neighbor])
+        self._intra_domain_paths_cache[cache_key] = results
         return results
 
     def _iter_unique_links(self, link_by_arc: dict[tuple[str, str], Any]) -> list[Any]:
@@ -1408,13 +1488,3 @@ class CrossWeaverScheduler(Scheduler):
         for link in link_by_arc.values():
             mapping[link.link_id] = link
         return mapping
-
-    def _link_by_id(self, link_id: str, link_by_arc: dict[tuple[str, str], Any]) -> Any:
-        cached = self._current_link_by_id.get(link_id)
-        if cached is not None:
-            return cached
-        for link in link_by_arc.values():
-            if link.link_id == link_id:
-                self._current_link_by_id[link_id] = link
-                return link
-        raise KeyError(link_id)

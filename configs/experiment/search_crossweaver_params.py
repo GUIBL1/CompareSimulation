@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
 import math
+import os
 import random
 import sys
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +16,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+sys.dont_write_bytecode = True
 
+from simulator.core.engine import RuntimeEngine
 from simulator.experiment.runner import ExperimentRunner
+from simulator.schedulers.crossweaver_metrics import build_crossweaver_run_metrics
 
 
 @dataclass
@@ -28,6 +33,16 @@ class TrialResult:
     comm_std_ms: float
     planning_mean_ms: float
     completion_ratio_mean: float
+    evaluated_seed_count: int
+    pruned: bool = False
+
+
+@dataclass
+class SeedResult:
+    seed: int
+    comm_ms: float
+    planning_ms: float
+    completion_ratio: float
 
 
 PARAM_SPACE: dict[str, dict[str, Any]] = {
@@ -76,6 +91,18 @@ def _read_int(prompt: str, default: int) -> int:
         print("请输入正整数。")
 
 
+def _read_non_negative_int(prompt: str, default: int) -> int:
+    while True:
+        raw = _read_text(prompt, str(default))
+        try:
+            value = int(raw)
+            if value >= 0:
+                return value
+        except ValueError:
+            pass
+        print("请输入大于等于 0 的整数。")
+
+
 def _read_seeds(prompt: str, defaults: list[int]) -> list[int]:
     default_text = ",".join(str(item) for item in defaults)
     raw = _read_text(prompt, default_text)
@@ -91,22 +118,48 @@ def _read_seeds(prompt: str, defaults: list[int]) -> list[int]:
     return values or defaults
 
 
-def _read_bool(prompt: str, default: bool) -> bool:
-    default_text = "y" if default else "n"
-    raw = _read_text(prompt + " (y/n)", default_text).lower()
-    if raw in {"y", "yes", "1", "true"}:
-        return True
-    if raw in {"n", "no", "0", "false"}:
-        return False
-    return default
-
-
 def _read_method(prompt: str, default: str = "bayes") -> str:
     while True:
         raw = _read_text(prompt + " (bayes/random)", default).lower()
         if raw in {"bayes", "random"}:
             return raw
         print("请输入 bayes 或 random。")
+
+
+def _read_float(prompt: str, default: float, min_value: float | None = None, max_value: float | None = None) -> float:
+    while True:
+        raw = _read_text(prompt, str(default))
+        try:
+            value = float(raw)
+        except ValueError:
+            print("请输入数字。")
+            continue
+        if min_value is not None and value < min_value:
+            print(f"请输入不小于 {min_value} 的数。")
+            continue
+        if max_value is not None and value > max_value:
+            print(f"请输入不大于 {max_value} 的数。")
+            continue
+        return value
+
+
+def _read_yes_no(prompt: str, default: bool = True) -> bool:
+    default_text = "y" if default else "n"
+    while True:
+        raw = _read_text(prompt + " (y/n)", default_text).strip().lower()
+        if raw in {"y", "yes", "1", "true"}:
+            return True
+        if raw in {"n", "no", "0", "false"}:
+            return False
+        print("请输入 y 或 n。")
+
+
+def _read_parallel_backend(prompt: str, default: str = "process") -> str:
+    while True:
+        raw = _read_text(prompt + " (process/thread/off)", default).lower()
+        if raw in {"process", "thread", "off"}:
+            return raw
+        print("请输入 process、thread 或 off。")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -116,33 +169,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def _save_yaml(path: Path, data: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=True)
-
-
-def _extract_metrics(summary: dict[str, Any]) -> tuple[float, float, float]:
-    aggregate = summary.get("aggregate_metrics", {})
-    repetitions = summary.get("repetitions", [])
-    if not repetitions:
-        return float("inf"), float("inf"), 0.0
-
-    first_rep = repetitions[0]
-    comm = float(
-        aggregate.get(
-            "avg_crossweaver_communication_execution_time_ms",
-            first_rep.get("crossweaver_communication_execution_time_ms", first_rep.get("completion_time_ms", float("inf"))),
-        )
-    )
-    planning = float(
-        aggregate.get(
-            "avg_crossweaver_scheduler_wall_time_ms",
-            first_rep.get("crossweaver_scheduler_wall_time_ms", 0.0),
-        )
-    )
-
-    total_jobs = float(aggregate.get("avg_total_job_count", first_rep.get("total_job_count", 0.0)))
-    completed_jobs = float(aggregate.get("avg_completed_job_count", first_rep.get("completed_job_count", 0.0)))
-    ratio = completed_jobs / total_jobs if total_jobs > 0 else 0.0
-    return comm, planning, ratio
+        yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=False)
 
 
 def _sample_random(rng: random.Random) -> dict[str, Any]:
@@ -276,8 +303,25 @@ def _fit_gaussian_process(history: list[TrialResult]) -> dict[str, Any] | None:
     if len(history) < 3:
         return None
 
-    x_data = [trial.vector for trial in history]
-    y_raw = [float(trial.score) for trial in history]
+    training_history = history
+    max_gp_points = 48
+    if len(history) > max_gp_points:
+        elite_count = max_gp_points // 2
+        recent_count = max_gp_points - elite_count
+        elite = sorted(history, key=lambda item: item.score)[:elite_count]
+        recent = history[-recent_count:]
+
+        merged: list[TrialResult] = []
+        seen_trial_ids: set[int] = set()
+        for item in [*elite, *recent]:
+            if item.trial_index in seen_trial_ids:
+                continue
+            seen_trial_ids.add(item.trial_index)
+            merged.append(item)
+        training_history = merged if len(merged) >= 3 else history[-max_gp_points:]
+
+    x_data = [trial.vector for trial in training_history]
+    y_raw = [float(trial.score) for trial in training_history]
     y_mean = sum(y_raw) / len(y_raw)
     y_var = sum((item - y_mean) ** 2 for item in y_raw) / max(1, len(y_raw) - 1)
     y_std = math.sqrt(max(y_var, 1e-12))
@@ -303,8 +347,6 @@ def _fit_gaussian_process(history: list[TrialResult]) -> dict[str, Any] | None:
             return {
                 "x_data": x_data,
                 "y_data": y_data,
-                "y_mean": y_mean,
-                "y_std": y_std,
                 "best_y": min(y_data),
                 "length_scale": length_scale,
                 "noise": noise,
@@ -333,7 +375,7 @@ def _predict_gaussian_process(model: dict[str, Any], x_candidate: list[float]) -
 
 def _sample_bayesian(rng: random.Random, history: list[TrialResult]) -> dict[str, Any]:
     dimension = len(PARAM_ORDER)
-    warmup_trials = max(8, 2 * dimension)
+    warmup_trials = max(6, min(16, dimension + 2))
     if len(history) < warmup_trials:
         return _sample_random(rng)
 
@@ -342,14 +384,14 @@ def _sample_bayesian(rng: random.Random, history: list[TrialResult]) -> dict[str
         return _sample_random(rng)
 
     candidate_vectors: list[list[float]] = []
-    random_pool_size = max(800, 40 * dimension)
+    random_pool_size = max(400, 20 * dimension)
     for _ in range(random_pool_size):
         params = _sample_random(rng)
         candidate_vectors.append(_vector_from_params(params))
 
     top_history = sorted(history, key=lambda item: item.score)[: max(4, len(history) // 4)]
     for trial in top_history:
-        for _ in range(16):
+        for _ in range(12):
             perturb = []
             for value in trial.vector:
                 sampled = rng.gauss(value, 0.12)
@@ -418,64 +460,51 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
-def _build_trial_config(base_cfg: dict[str, Any], params: dict[str, Any], seed: int, output_dir: str) -> dict[str, Any]:
-    cfg = json.loads(json.dumps(base_cfg))
-    cfg.setdefault("scheduler", {}).setdefault("crossweaver", {})
-    cfg["scheduler"]["type"] = "crossweaver"
-    cfg["scheduler"]["crossweaver"].update(params)
-    cfg.setdefault("simulation", {})["random_seed"] = seed
-    cfg["simulation"]["repetitions"] = 1
-    cfg.setdefault("metrics", {})["output_dir"] = output_dir
-    cfg["metrics"].setdefault("export_json", True)
-    cfg["metrics"].setdefault("export_csv", True)
-    cfg["metrics"].setdefault("export_trace", True)
-    return cfg
-
-
-def _resolve_input_path(base_exp_path: Path, raw_path: str) -> str:
-    candidate = Path(raw_path)
-    if candidate.is_absolute():
-        return str(candidate)
-    direct = (base_exp_path.parent / candidate).resolve()
-    if direct.exists():
-        return str(direct)
-    workspace_relative = (ROOT / candidate).resolve()
-    return str(workspace_relative)
-
-
-def _evaluate_trial(
-    base_cfg: dict[str, Any],
-    base_exp_path: Path,
-    trial_index: int,
+def _run_single_seed(
+    experiment_file: str,
     params: dict[str, Any],
-    seeds: list[int],
-    work_dir: Path,
-) -> TrialResult:
-    comm_values: list[float] = []
-    planning_values: list[float] = []
-    ratios: list[float] = []
+    seed: int,
+    max_time_ms_override: int,
+) -> SeedResult:
+    exp_path = Path(experiment_file)
+    runner = ExperimentRunner(exp_path)
+    experiment = runner._load_experiment_config()
+    experiment.scheduler.type = "crossweaver"
+    experiment.scheduler.crossweaver.update(params)
+    experiment.simulation.random_seed = int(seed)
+    experiment.simulation.repetitions = 1
+    if max_time_ms_override > 0:
+        experiment.simulation.max_time_ms = int(max_time_ms_override)
 
-    trial_dir = work_dir / f"trial_{trial_index:03d}"
-    trial_dir.mkdir(parents=True, exist_ok=True)
+    runtime, scheduler = runner.load_inputs(experiment)
+    runtime.metadata["repetition_index"] = 0
+    runtime.metadata["random_seed"] = int(seed)
+    engine = RuntimeEngine(
+        max_time_ms=experiment.simulation.max_time_ms,
+        bandwidth_sharing_model=experiment.simulation.bandwidth_sharing_model,
+    )
+    final_runtime = engine.run(runtime, scheduler, experiment)
+    scheduler_debug_state = scheduler.export_debug_state()
+    crossweaver_metrics = build_crossweaver_run_metrics(final_runtime, scheduler_debug_state)
 
-    for idx, seed in enumerate(seeds):
-        out_dir = trial_dir / f"seed_{seed}"
-        out_dir_rel = str(out_dir.relative_to(ROOT)) if out_dir.is_relative_to(ROOT) else str(out_dir)
-        cfg = _build_trial_config(base_cfg, params, seed, out_dir_rel)
-        cfg.setdefault("inputs", {})
-        cfg["inputs"]["topology_file"] = _resolve_input_path(base_exp_path, str(cfg["inputs"].get("topology_file", "")))
-        cfg["inputs"]["workload_file"] = _resolve_input_path(base_exp_path, str(cfg["inputs"].get("workload_file", "")))
-        temp_exp_path = trial_dir / f"exp_seed_{idx}.yaml"
-        _save_yaml(temp_exp_path, cfg)
+    total_jobs = float(len(final_runtime.active_jobs))
+    completed_jobs = float(len(final_runtime.completed_job_ids))
+    ratio = completed_jobs / total_jobs if total_jobs > 0 else 0.0
 
-        runner = ExperimentRunner(temp_exp_path)
-        run_result = runner.export_results()
-        summary_path = run_result.output_dir / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        comm, planning, ratio = _extract_metrics(summary)
-        comm_values.append(comm)
-        planning_values.append(planning)
-        ratios.append(ratio)
+    return SeedResult(
+        seed=int(seed),
+        comm_ms=float(crossweaver_metrics.get("crossweaver_communication_execution_time_ms", final_runtime.now_ms) or final_runtime.now_ms),
+        planning_ms=float(crossweaver_metrics.get("crossweaver_scheduler_wall_time_ms", 0.0) or 0.0),
+        completion_ratio=float(ratio),
+    )
+
+
+def _score_components_from_seed_results(
+    seed_results: list[SeedResult],
+) -> tuple[float, float, float, float, float]:
+    comm_values = [item.comm_ms for item in seed_results]
+    planning_values = [item.planning_ms for item in seed_results]
+    ratios = [item.completion_ratio for item in seed_results]
 
     comm_mean = sum(comm_values) / len(comm_values)
     planning_mean = sum(planning_values) / len(planning_values)
@@ -488,6 +517,103 @@ def _evaluate_trial(
     if ratio_mean < 1.0:
         penalty += (1.0 - ratio_mean) * 1_000_000.0
     score = comm_mean + 0.35 * planning_mean + 0.15 * comm_std + penalty
+    return score, comm_mean, planning_mean, comm_std, ratio_mean
+
+
+def _optimistic_score_lower_bound(
+    seed_results: list[SeedResult],
+    total_seed_count: int,
+) -> float:
+    if not seed_results:
+        return 0.0
+    completed = len(seed_results)
+    remaining = max(0, total_seed_count - completed)
+
+    comm_sum = sum(item.comm_ms for item in seed_results)
+    planning_sum = sum(item.planning_ms for item in seed_results)
+    ratio_sum = sum(item.completion_ratio for item in seed_results)
+
+    comm_lb = comm_sum / max(total_seed_count, 1)
+    planning_lb = planning_sum / max(total_seed_count, 1)
+    ratio_ub = min(1.0, (ratio_sum + remaining * 1.0) / max(total_seed_count, 1))
+    penalty_lb = 0.0
+    if ratio_ub < 1.0:
+        penalty_lb += (1.0 - ratio_ub) * 1_000_000.0
+
+    return comm_lb + 0.35 * planning_lb + penalty_lb
+
+
+def _evaluate_trial(
+    experiment_file: str,
+    trial_index: int,
+    params: dict[str, Any],
+    seeds: list[int],
+    parallel_backend: str,
+    max_workers: int,
+    max_time_ms_override: int,
+    best_score_hint: float | None,
+    prune_score_margin_ratio: float,
+    min_seeds_before_prune: int,
+) -> TrialResult:
+    if not seeds:
+        raise ValueError("seeds 不能为空")
+
+    prune_threshold = None
+    if best_score_hint is not None and math.isfinite(float(best_score_hint)):
+        prune_threshold = float(best_score_hint) * (1.0 + max(0.0, float(prune_score_margin_ratio)))
+
+    seed_results: list[SeedResult] = []
+    pruned = False
+    workers = max(1, min(int(max_workers), len(seeds)))
+
+    if parallel_backend == "off" or workers <= 1 or len(seeds) <= 1:
+        for seed in seeds:
+            seed_results.append(_run_single_seed(experiment_file, params, int(seed), max_time_ms_override))
+            if prune_threshold is None:
+                continue
+            if len(seed_results) < max(1, int(min_seeds_before_prune)):
+                continue
+            lower_bound = _optimistic_score_lower_bound(seed_results, total_seed_count=len(seeds))
+            if lower_bound >= prune_threshold:
+                pruned = True
+                break
+    else:
+        executor_cls = ProcessPoolExecutor if parallel_backend == "process" else ThreadPoolExecutor
+        executor = executor_cls(max_workers=workers)
+        future_by_seed = {
+            executor.submit(_run_single_seed, experiment_file, params, int(seed), max_time_ms_override): int(seed)
+            for seed in seeds
+        }
+        try:
+            for future in as_completed(future_by_seed):
+                seed = future_by_seed[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    raise RuntimeError(f"seed={seed} 执行失败: {exc}") from exc
+                seed_results.append(result)
+                if prune_threshold is None:
+                    continue
+                if len(seed_results) < max(1, int(min_seeds_before_prune)):
+                    continue
+                lower_bound = _optimistic_score_lower_bound(seed_results, total_seed_count=len(seeds))
+                if lower_bound >= prune_threshold:
+                    pruned = True
+                    for pending in future_by_seed:
+                        if not pending.done():
+                            pending.cancel()
+                    break
+        finally:
+            if pruned:
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=True, cancel_futures=False)
+
+    if not seed_results:
+        raise RuntimeError("trial 未得到任何 seed 结果")
+    seed_results.sort(key=lambda item: item.seed)
+
+    score, comm_mean, planning_mean, comm_std, ratio_mean = _score_components_from_seed_results(seed_results)
 
     return TrialResult(
         trial_index=trial_index,
@@ -498,6 +624,8 @@ def _evaluate_trial(
         comm_std_ms=comm_std,
         planning_mean_ms=planning_mean,
         completion_ratio_mean=ratio_mean,
+        evaluated_seed_count=len(seed_results),
+        pruned=pruned,
     )
 
 
@@ -519,12 +647,24 @@ def _params_signature(params: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(items)
 
 
+def _write_back_best_params(experiment_path: Path, best_params: dict[str, Any]) -> None:
+    cfg = _load_yaml(experiment_path)
+    scheduler = cfg.setdefault("scheduler", {})
+    scheduler["type"] = "crossweaver"
+    crossweaver_cfg = scheduler.setdefault("crossweaver", {})
+    for key in PARAM_ORDER:
+        if key in best_params:
+            crossweaver_cfg[key] = best_params[key]
+    _save_yaml(experiment_path, cfg)
+
+
 def main() -> None:
-    print("CrossWeaver 参数搜索（交互式）")
+    print("CrossWeaver 参数搜索（交互式，纯内存评估）")
     print("- 输入一个 crossweaver 实验 YAML")
     print("- 脚本会基于其 topology/workload 做参数搜索")
     print("- bayes 采用 GP + EI 的贝叶斯优化")
-    print("- 最后可将最优参数回写到该实验文件")
+    print("- 搜索过程不写中间结果文件，仅在终端打印")
+    print("- 搜索结束后可选择将最优参数回写实验文件")
     print()
 
     exp_text = _read_text("请输入 crossweaver 实验文件路径", "configs/experiment/inter_dc_triple_heavy_crossweaver.yaml")
@@ -543,24 +683,34 @@ def main() -> None:
     trials = _read_int("搜索 trial 数", 30)
     seeds = _read_seeds("评估 seeds（逗号分隔）", default_seeds)
     method = _read_method("搜索方式")
-    apply_best = _read_bool("是否把最优参数直接写回原实验文件", True)
+    backend = _read_parallel_backend("seed 评估并行方式")
+    default_workers = min(len(seeds), max(1, os.cpu_count() or 1))
+    max_workers = _read_int("并行 worker 数", default_workers)
+    enable_pruning = _read_yes_no("是否启用 bad trial 早停剪枝", True)
+    min_seeds_before_prune = _read_int("最少评估多少个 seed 后开始早停判定", min(2, max(1, len(seeds))))
+    prune_score_margin_ratio = _read_float("早停阈值裕量（相对当前最优分数，0.05=5%）", 0.03, min_value=0.0, max_value=1.0)
+    max_time_ms_override = _read_non_negative_int("搜索时 max_time_ms 覆盖值（0=不覆盖）", 0)
+    write_back_best = _read_yes_no("搜索结束后是否将最优参数回写到实验文件", True)
 
     topology_file = base_cfg.get("inputs", {}).get("topology_file", "")
     workload_file = base_cfg.get("inputs", {}).get("workload_file", "")
     print(f"\n拓扑: {topology_file}")
     print(f"工作负载: {workload_file}")
     print(f"trial 数: {trials}, seeds: {seeds}, 方式: {method}")
+    print(f"并行: backend={backend}, workers={max_workers}")
+    print(
+        f"早停剪枝: enabled={enable_pruning}, min_seeds={min_seeds_before_prune}, "
+        f"margin={prune_score_margin_ratio:.3f}"
+    )
+    print(f"max_time_ms 覆盖: {max_time_ms_override}")
+    print("max_time_ms 覆盖说明: 输入 >0 时，搜索会临时覆盖 simulation.max_time_ms；输入 0 时，沿用实验 YAML 原值。")
+    print(f"最优参数回写实验文件: {write_back_best}")
     print(f"搜索维度: {len(PARAM_ORDER)}\n")
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    search_root = ROOT / "results" / "crossweaver_param_search"
-    search_root.mkdir(parents=True, exist_ok=True)
-    run_dir = search_root / f"{exp_path.stem}_{timestamp}"
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     rng = random.Random(base_seed)
     history: list[TrialResult] = []
     visited_signatures: set[tuple[Any, ...]] = set()
+    best_score_so_far: float | None = None
 
     for trial in range(1, trials + 1):
         if method == "random":
@@ -577,56 +727,31 @@ def main() -> None:
         visited_signatures.add(signature)
 
         result = _evaluate_trial(
-            base_cfg=base_cfg,
-            base_exp_path=exp_path,
+            experiment_file=str(exp_path),
             trial_index=trial,
             params=params,
             seeds=seeds,
-            work_dir=run_dir,
+            parallel_backend=backend,
+            max_workers=max_workers,
+            max_time_ms_override=max_time_ms_override,
+            best_score_hint=(best_score_so_far if enable_pruning else None),
+            prune_score_margin_ratio=prune_score_margin_ratio if enable_pruning else 0.0,
+            min_seeds_before_prune=min_seeds_before_prune if enable_pruning else len(seeds),
         )
         history.append(result)
+        if best_score_so_far is None or result.score < best_score_so_far:
+            best_score_so_far = result.score
 
+        prune_tag = " [PRUNED]" if result.pruned else ""
         print(
             f"trial={trial:03d} score={result.score:.3f} "
             f"comm={result.comm_mean_ms:.3f}±{result.comm_std_ms:.3f} "
-            f"plan={result.planning_mean_ms:.3f} ratio={result.completion_ratio_mean:.3f}"
+            f"plan={result.planning_mean_ms:.3f} ratio={result.completion_ratio_mean:.3f} "
+            f"seeds={result.evaluated_seed_count}/{len(seeds)}{prune_tag}"
         )
 
     best = min(history, key=lambda item: item.score)
-
-    report = {
-        "experiment_file": str(exp_path),
-        "topology_file": topology_file,
-        "workload_file": workload_file,
-        "search_method": method,
-        "optimizer": "gaussian_process_expected_improvement" if method == "bayes" else "random_search",
-        "trials": trials,
-        "seeds": seeds,
-        "search_space": PARAM_SPACE,
-        "best": {
-            "trial_index": best.trial_index,
-            "score": best.score,
-            "comm_mean_ms": best.comm_mean_ms,
-            "comm_std_ms": best.comm_std_ms,
-            "planning_mean_ms": best.planning_mean_ms,
-            "completion_ratio_mean": best.completion_ratio_mean,
-            "params": best.params,
-        },
-        "all_trials": [
-            {
-                "trial_index": item.trial_index,
-                "score": item.score,
-                "comm_mean_ms": item.comm_mean_ms,
-                "comm_std_ms": item.comm_std_ms,
-                "planning_mean_ms": item.planning_mean_ms,
-                "completion_ratio_mean": item.completion_ratio_mean,
-                "params": item.params,
-            }
-            for item in sorted(history, key=lambda value: value.score)
-        ],
-    }
-    report_path = run_dir / "search_report.json"
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    ranked = sorted(history, key=lambda value: value.score)
 
     print("\n=== 搜索完成 ===")
     print(f"best trial: {best.trial_index}")
@@ -634,18 +759,23 @@ def main() -> None:
     print(f"best comm mean: {best.comm_mean_ms:.3f} ms")
     print(f"best planning mean: {best.planning_mean_ms:.3f} ms")
     print(f"best completion ratio: {best.completion_ratio_mean:.3f}")
-    print(f"report: {report_path}")
     print("best params:")
-    print(json.dumps(best.params, indent=2, ensure_ascii=False))
+    for key in PARAM_ORDER:
+        print(f"  {key}: {best.params.get(key)}")
 
-    if apply_best:
-        cfg = _load_yaml(exp_path)
-        cfg.setdefault("scheduler", {}).setdefault("crossweaver", {})
-        cfg["scheduler"]["crossweaver"].update(best.params)
-        _save_yaml(exp_path, cfg)
-        print(f"\n已回写最优参数到: {exp_path}")
+    if write_back_best:
+        _write_back_best_params(exp_path, best.params)
+        print(f"\n已将最优参数回写到: {exp_path}")
     else:
-        print("\n未回写原实验文件（按你的选择保留不改）。")
+        print("\n未回写实验文件。")
+
+    print("\nTop-3 trial:")
+    for item in ranked[:3]:
+        print(
+            f"  trial={item.trial_index:03d} score={item.score:.3f} "
+            f"comm={item.comm_mean_ms:.3f} plan={item.planning_mean_ms:.3f} "
+            f"ratio={item.completion_ratio_mean:.3f}"
+        )
 
 
 if __name__ == "__main__":
