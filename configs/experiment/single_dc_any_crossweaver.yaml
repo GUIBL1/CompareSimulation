@@ -18,12 +18,25 @@ scheduler:
     stable_per_flow: true
   crossweaver:
     slot_ms: 1.0
-    headroom_ratio: 0.1
+    headroom_ratio: 0.08
     epsilon: 0.08
-    gamma: 0.05
-    stage1_max_iterations: 16
-    stage2_max_iterations: 20
-    stage2_binary_search_rounds: 20
+    gamma: 0.04
+    stage1_max_iterations: 24
+    stage1_binary_search_rounds: 36
+    stage1_backoff_ratio: 0.92
+    stage1_backoff_max_rounds: 3
+    stage1_safety_margin_ratio: 0.02
+    stage1_rate_smoothing_alpha: 0.8
+    stage1_rate_change_cap_ratio: 0.8
+    stage2_max_iterations: 32
+    stage2_binary_search_rounds: 24
+    cross_path_ecmp_k: 4
+    stage2_path_split_k: 3
+    stage2_initial_max_paths: 10
+    stage2_max_path_expansion: 20
+    stage2_path_expansion_step: 4
+    stage2_softmin_temperature: 0.2
+    wcmp_update_threshold_l1: 0.03
     feasibility_tolerance: 1.0e-6
     queue_wait_estimation_mode: zero
 

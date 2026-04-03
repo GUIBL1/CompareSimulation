@@ -127,6 +127,12 @@ metrics:
 - `epsilon`：Stage I-B MWU 更新步长。
 - `gamma`：Stage II 价格更新步长。
 - `stage1_max_iterations`：Stage I-B 最大迭代次数。
+- `stage1_binary_search_rounds`：Stage I-A 的 \(\theta\) 二分轮数。
+- `stage1_backoff_ratio`：Stage I-B 不可行时跨域承诺速率缩放系数。
+- `stage1_backoff_max_rounds`：Stage I-B 回退重试上限。
+- `stage1_safety_margin_ratio`：Stage I-A 对 \(B_f\) 的安全裕量比例。
+- `stage1_rate_smoothing_alpha`：跨 slot 速率平滑系数 \(\alpha\)。
+- `stage1_rate_change_cap_ratio`：跨 slot 速率变化上限比例。
 - `stage2_max_iterations`：Stage II 给定 T 的价格迭代次数。
 - `stage2_binary_search_rounds`：Stage II 对 T 的二分轮数。
 - `cross_path_ecmp_k`：Stage I-A 跨域路径候选上限（按 DCI 签名去重后取前 K）。
@@ -134,6 +140,8 @@ metrics:
 - `stage2_initial_max_paths`：Stage II 初始域内候选路径上限。
 - `stage2_max_path_expansion`：Stage II 不可行时扩展后的路径上限。
 - `stage2_path_expansion_step`：Stage II 每轮扩展路径数。
+- `stage2_softmin_temperature`：Stage II 软最小分流温度参数。
+- `wcmp_update_threshold_l1`：WCMP 权重更新阈值（L1 范数）。
 - `stage1_early_stop_patience`：Stage I-B 提前收敛容忍轮次。
 - `stage2_early_stop_patience`：Stage II 价格迭代提前收敛容忍轮次。
 - `stage2_binary_search_tolerance_ms`：Stage II 二分提前收敛阈值。
@@ -165,6 +173,12 @@ metrics:
    - `stage1_max_iterations` / `stage1_early_stop_patience`
      - 作用：控制 Stage I-B 收敛预算与提前停止。
      - 影响：预算太低易欠收敛，预算过高会抬高 planning time。
+   - `stage1_backoff_ratio` / `stage1_backoff_max_rounds`
+     - 作用：当 Stage I-B 在预算内不可行时，回退跨域承诺并重试。
+     - 影响：回退过小可能仍不可行；回退过大可能保守，通信时间上升。
+   - `stage1_rate_smoothing_alpha` / `stage1_rate_change_cap_ratio`
+     - 作用：抑制跨 slot 速率抖动，降低路径更新震荡。
+     - 影响：过强平滑会降低响应速度；过弱会导致频繁重配置。
 
 3. Stage II（域内完成时间优化）
    - `gamma`
@@ -187,6 +201,12 @@ metrics:
    - `stage2_max_iterations` / `stage2_binary_search_rounds` / `stage2_binary_search_tolerance_ms` / `stage2_early_stop_patience`
      - 作用：控制 Stage II 的“可行性内循环 + T 二分”预算。
      - 影响：预算不足会导致欠优化；预算过高会拉长 planning。
+   - `stage2_softmin_temperature`
+     - 作用：控制低价路径偏好强度。
+     - 影响：温度过低可能过度集中到少数路径，过高会稀释负载引导。
+   - `wcmp_update_threshold_l1`
+     - 作用：控制 WCMP 权重的更新门限，减少抖动。
+     - 影响：阈值过高可能错失优化机会，阈值过低可能带来过多更新。
 
 4. 队列等待估计
    - `queue_wait_estimation_mode`
@@ -277,8 +297,16 @@ scheduler:
     epsilon: 0.08
     gamma: 0.05
     stage1_max_iterations: 24
+    stage1_binary_search_rounds: 42
+    stage1_backoff_ratio: 0.9
+    stage1_backoff_max_rounds: 4
+    stage1_safety_margin_ratio: 0.05
+    stage1_rate_smoothing_alpha: 0.7
+    stage1_rate_change_cap_ratio: 0.5
     stage2_max_iterations: 32
     stage2_binary_search_rounds: 24
+    stage2_softmin_temperature: 0.25
+    wcmp_update_threshold_l1: 0.05
     feasibility_tolerance: 1.0e-6
     queue_wait_estimation_mode: zero
 ```
@@ -335,8 +363,8 @@ python configs/experiment/search_crossweaver_params.py
 
 交互输入项：
 1. CrossWeaver 实验文件路径（必填，`scheduler.type` 必须为 `crossweaver`）。
-2. `trial` 数（默认 20）。
-3. 评估 `seeds`（默认 `[base_seed, base_seed+17, base_seed+29]`）。
+2. `trial` 数（默认 30）。
+3. 评估 `seeds`（默认 `[base_seed, base_seed+17, base_seed+29, base_seed+43]`）。
 4. 搜索方式：`bayes` 或 `random`。
 5. 是否将最优参数直接回写原实验文件。
 
@@ -350,8 +378,8 @@ python configs/experiment/search_crossweaver_params.py
 - 输出 `results/crossweaver_param_search/<exp_name>_<timestamp>/search_report.json`。
 
 说明：
-- `bayes` 为“贝叶斯式自适应采样”（基于历史优胜样本的概率建模采样），无需额外第三方依赖。
-- 若只想做纯随机扫描，选择 `random`。
+- `bayes` 使用“高斯过程 + Expected Improvement”做标准贝叶斯优化，无需额外第三方依赖。
+- `random` 为纯随机扫描，适合作为 baseline。
 
 ## 书写建议
 
