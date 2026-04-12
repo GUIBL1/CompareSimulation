@@ -93,6 +93,18 @@ class GpuTopologyInventory:
     dc_to_gpu_ids: dict[str, list[str]]
 
 
+@dataclass(slots=True)
+class StructuredFlowConfig:
+    collective_gpu_count: int
+    collective_total_data_mb: float
+    collective_chunk_count: int
+    collective_job_count_per_dc: int
+    cross_dc_job_count: int
+    cross_dc_total_data_mb: float
+    cross_dc_chunk_count: int
+    round_count: int
+
+
 DEFAULT_WORKLOAD_META = WorkloadMeta()
 
 
@@ -108,6 +120,10 @@ def main() -> None:
     print(f"已从 {topology_path} 提取 {len(gpu_node_ids)} 个 GPU 节点。")
     print(f"前 10 个 GPU: {', '.join(gpu_node_ids[:10])}")
     print(f"检测到 DC: {', '.join(sorted(topology_inventory.dc_to_gpu_ids.keys(), key=_natural_sort_key))}")
+    dc_gpu_counts = _detect_dc_gpu_counts(topology_inventory)
+    print("各 DC GPU 数量检测结果:")
+    for dc in sorted(dc_gpu_counts.keys(), key=_natural_sort_key):
+        print(f"  - {dc}: {dc_gpu_counts[dc]} 个 GPU")
 
     meta = WorkloadMeta(
         name=args.name if args.name is not None else _prompt_string("meta.name", DEFAULT_WORKLOAD_META.name),
@@ -126,25 +142,38 @@ def main() -> None:
 
     random_seed = args.random_seed if args.random_seed is not None else _prompt_int("随机种子", 42, minimum=0)
     rng = random.Random(random_seed)
-    job_count = args.job_count if args.job_count is not None else _prompt_int("job 个数", 1, minimum=1)
 
     if str(selected_mode) == "1":
+        job_count = args.job_count if args.job_count is not None else _prompt_int("job 个数", 1, minimum=1)
         jobs = build_manual_jobs(job_count=job_count, topology_inventory=topology_inventory, rng=rng)
     else:
-        simulation_round_mode = args.simulation_round_mode or _prompt_choice(
-            "模式 2 的 job 模拟轮次",
+        mode2_flow_mode = args.mode2_flow_mode or _prompt_choice(
+            "模式 2 流量构造方式",
             {
-                "1": "单轮 job 模拟",
-                "2": "多轮 job 模拟",
+                "1": "标准生产画像随机生成",
+                "2": "结构化分层流量（各 DC 域内集合通信 + 跨 DC 点到点）",
             },
             default_key="1",
         )
-        jobs = build_random_profile_jobs(
-            job_count=job_count,
-            topology_inventory=topology_inventory,
-            rng=rng,
-            multi_iteration_enabled=str(simulation_round_mode) == "2",
-        )
+        if str(mode2_flow_mode) == "2":
+            structured_config = _build_structured_flow_config(args=args, topology_inventory=topology_inventory)
+            jobs = build_structured_flow_jobs(topology_inventory=topology_inventory, rng=rng, config=structured_config)
+        else:
+            simulation_round_mode = args.simulation_round_mode or _prompt_choice(
+                "模式 2 的 job 模拟轮次",
+                {
+                    "1": "单轮 job 模拟",
+                    "2": "多轮 job 模拟",
+                },
+                default_key="1",
+            )
+            job_count = args.job_count if args.job_count is not None else _prompt_int("job 个数", 1, minimum=1)
+            jobs = build_random_profile_jobs(
+                job_count=job_count,
+                topology_inventory=topology_inventory,
+                rng=rng,
+                multi_iteration_enabled=str(simulation_round_mode) == "2",
+            )
 
     payload = {
         "meta": {
@@ -172,8 +201,53 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         choices=["1", "2"],
         help="Only used in mode 2. 1=single-iteration jobs, 2=multi-iteration jobs with randomized iteration fields.",
     )
+    parser.add_argument(
+        "--mode2-flow-mode",
+        choices=["1", "2"],
+        help="Only used in mode 2. 1=standard profile random generation, 2=structured layered flow generation.",
+    )
     parser.add_argument("--job-count", type=int, help="How many jobs to generate.")
     parser.add_argument("--random-seed", type=int, help="Random seed used for random choices.")
+    parser.add_argument(
+        "--structured-collective-gpu-count",
+        type=int,
+        help="Only used in mode2-flow-mode=2. GPU count per intra-DC collective job.",
+    )
+    parser.add_argument(
+        "--structured-collective-total-data-mb",
+        type=float,
+        help="Only used in mode2-flow-mode=2. total_data_mb for intra-DC collective jobs.",
+    )
+    parser.add_argument(
+        "--structured-collective-chunk-count",
+        type=int,
+        help="Only used in mode2-flow-mode=2. chunk_count for intra-DC collective jobs.",
+    )
+    parser.add_argument(
+        "--structured-collective-job-count-per-dc",
+        type=int,
+        help="Only used in mode2-flow-mode=2. how many intra-DC collective jobs to build per DC in each round.",
+    )
+    parser.add_argument(
+        "--structured-cross-dc-job-count",
+        type=int,
+        help="Only used in mode2-flow-mode=2. cross-DC point-to-point job count per round.",
+    )
+    parser.add_argument(
+        "--structured-cross-dc-total-data-mb",
+        type=float,
+        help="Only used in mode2-flow-mode=2. total_data_mb for cross-DC point-to-point jobs.",
+    )
+    parser.add_argument(
+        "--structured-cross-dc-chunk-count",
+        type=int,
+        help="Only used in mode2-flow-mode=2. chunk_count for cross-DC point-to-point jobs.",
+    )
+    parser.add_argument(
+        "--structured-round-count",
+        type=int,
+        help="Only used in mode2-flow-mode=2. how many rounds to repeat the structured generation process.",
+    )
     return parser
 
 
@@ -352,6 +426,140 @@ def build_random_profile_jobs(
                 dependency_mode=str(profile["dependency_mode"]),
             )
         )
+    return jobs
+
+
+def _build_structured_flow_config(args: argparse.Namespace, topology_inventory: GpuTopologyInventory) -> StructuredFlowConfig:
+    print("进入模式 2：结构化分层流量生成。")
+    collective_gpu_count = (
+        args.structured_collective_gpu_count
+        if args.structured_collective_gpu_count is not None
+        else _prompt_int("每个 DC 每个域内集合通信 job 的 GPU 数", 4, minimum=2)
+    )
+    collective_total_data_mb = (
+        args.structured_collective_total_data_mb
+        if args.structured_collective_total_data_mb is not None
+        else _prompt_float("域内集合通信 total_data_mb", 4096.0, minimum=0.000001)
+    )
+    collective_chunk_count = (
+        args.structured_collective_chunk_count
+        if args.structured_collective_chunk_count is not None
+        else _prompt_int("域内集合通信 chunk_count", 16, minimum=1)
+    )
+    collective_job_count_per_dc = (
+        args.structured_collective_job_count_per_dc
+        if args.structured_collective_job_count_per_dc is not None
+        else _prompt_int("每个 DC 每轮域内集合通信 job 数", 1, minimum=1)
+    )
+
+    cross_dc_default_job_count = 1 if _has_multi_dc(topology_inventory) else 0
+    cross_dc_job_count = (
+        args.structured_cross_dc_job_count
+        if args.structured_cross_dc_job_count is not None
+        else _prompt_int("每轮跨 DC 点到点通信 job 数", cross_dc_default_job_count, minimum=0)
+    )
+    if cross_dc_job_count > 0 and not _has_multi_dc(topology_inventory):
+        raise SystemExit("当前拓扑仅包含单个 DC，无法生成跨 DC 点到点通信 job。")
+    cross_dc_total_data_mb = (
+        args.structured_cross_dc_total_data_mb
+        if args.structured_cross_dc_total_data_mb is not None
+        else _prompt_float("跨 DC 点到点通信 total_data_mb", 4096.0, minimum=0.000001)
+    )
+    cross_dc_chunk_count = (
+        args.structured_cross_dc_chunk_count
+        if args.structured_cross_dc_chunk_count is not None
+        else _prompt_int("跨 DC 点到点通信 chunk_count", 16, minimum=1)
+    )
+    round_count = (
+        args.structured_round_count
+        if args.structured_round_count is not None
+        else _prompt_int("结构化流量执行轮次", 1, minimum=1)
+    )
+
+    _validate_each_dc_gpu_capacity(topology_inventory=topology_inventory, required_gpu_count=collective_gpu_count)
+
+    return StructuredFlowConfig(
+        collective_gpu_count=collective_gpu_count,
+        collective_total_data_mb=float(collective_total_data_mb),
+        collective_chunk_count=collective_chunk_count,
+        collective_job_count_per_dc=collective_job_count_per_dc,
+        cross_dc_job_count=cross_dc_job_count,
+        cross_dc_total_data_mb=float(cross_dc_total_data_mb),
+        cross_dc_chunk_count=cross_dc_chunk_count,
+        round_count=round_count,
+    )
+
+
+def build_structured_flow_jobs(
+    topology_inventory: GpuTopologyInventory,
+    rng: random.Random,
+    config: StructuredFlowConfig,
+) -> list[dict[str, Any]]:
+    _validate_each_dc_gpu_capacity(topology_inventory=topology_inventory, required_gpu_count=config.collective_gpu_count)
+
+    jobs: list[dict[str, Any]] = []
+    job_sequence = 1
+    dc_names = sorted(topology_inventory.dc_to_gpu_ids.keys(), key=_natural_sort_key)
+    print(
+        "结构化流量参数："
+        f"每轮每个 DC 生成 {config.collective_job_count_per_dc} 个域内集合通信 job，"
+        f"每个 job 使用 {config.collective_gpu_count} 个 GPU；"
+        f"每轮跨 DC 点到点 job 数 {config.cross_dc_job_count}；"
+        f"总轮次 {config.round_count}。"
+    )
+
+    for round_index in range(config.round_count):
+        round_collective_participants: dict[str, set[str]] = {dc: set() for dc in dc_names}
+        for dc in dc_names:
+            dc_gpu_ids = topology_inventory.dc_to_gpu_ids[dc]
+            for _ in range(config.collective_job_count_per_dc):
+                communication_pattern = str(rng.choice(COMMUNICATION_PATTERNS))
+                participants = sorted(rng.sample(dc_gpu_ids, config.collective_gpu_count), key=_natural_sort_key)
+                round_collective_participants[dc].update(participants)
+                jobs.append(
+                    build_job_record(
+                        job_id=f"job_{job_sequence:03d}",
+                        arrival_time_ms=0.0,
+                        participants=participants,
+                        communication_pattern=communication_pattern,
+                        total_data_mb=config.collective_total_data_mb,
+                        chunk_count=config.collective_chunk_count,
+                        compute_phase_ms=0.0,
+                        iteration_count=1,
+                        repeat_interval_ms=0.0,
+                        dependency_mode="strict",
+                    )
+                )
+                job_sequence += 1
+
+        if config.cross_dc_job_count <= 0:
+            continue
+
+        active_dcs = [dc for dc, participants in round_collective_participants.items() if participants]
+        if len(active_dcs) < 2:
+            raise SystemExit(
+                f"第 {round_index + 1} 轮中可用于跨 DC 点到点通信的 DC 数不足 2 个，无法生成跨域 job。"
+            )
+
+        for _ in range(config.cross_dc_job_count):
+            src_dc, dst_dc = rng.sample(active_dcs, 2)
+            src_gpu = str(rng.choice(sorted(round_collective_participants[src_dc], key=_natural_sort_key)))
+            dst_gpu = str(rng.choice(sorted(round_collective_participants[dst_dc], key=_natural_sort_key)))
+            jobs.append(
+                build_job_record(
+                    job_id=f"job_{job_sequence:03d}",
+                    arrival_time_ms=0.0,
+                    participants=sorted([src_gpu, dst_gpu], key=_natural_sort_key),
+                    communication_pattern=POINT_TO_POINT_PATTERN,
+                    total_data_mb=config.cross_dc_total_data_mb,
+                    chunk_count=config.cross_dc_chunk_count,
+                    compute_phase_ms=0.0,
+                    iteration_count=1,
+                    repeat_interval_ms=0.0,
+                    dependency_mode="independent",
+                )
+            )
+            job_sequence += 1
     return jobs
 
 
@@ -575,6 +783,30 @@ def _validate_participants_exist(participants: list[str], gpu_node_ids: list[str
         raise SystemExit(f"participants 中包含拓扑中不存在的 GPU 节点: {', '.join(missing)}")
 
 
+def _detect_dc_gpu_counts(topology_inventory: GpuTopologyInventory) -> dict[str, int]:
+    dc_gpu_counts: dict[str, int] = {}
+    for dc, gpu_ids in topology_inventory.dc_to_gpu_ids.items():
+        unique_gpu_ids = set(gpu_ids)
+        if not unique_gpu_ids:
+            raise SystemExit(f"检测失败：数据中心 {dc} 内没有 GPU 节点。")
+        if len(unique_gpu_ids) != len(gpu_ids):
+            raise SystemExit(f"检测失败：数据中心 {dc} 存在重复 GPU 节点定义。")
+        dc_gpu_counts[dc] = len(unique_gpu_ids)
+    return dc_gpu_counts
+
+
+def _validate_each_dc_gpu_capacity(topology_inventory: GpuTopologyInventory, required_gpu_count: int) -> None:
+    insufficient: list[tuple[str, int]] = []
+    for dc, gpu_ids in topology_inventory.dc_to_gpu_ids.items():
+        if len(gpu_ids) < required_gpu_count:
+            insufficient.append((dc, len(gpu_ids)))
+    if insufficient:
+        details = "; ".join(f"{dc}: {count}" for dc, count in sorted(insufficient, key=lambda item: _natural_sort_key(item[0])))
+        raise SystemExit(
+            f"以下数据中心 GPU 数量不足，无法在每个域内集合通信 job 中使用 {required_gpu_count} 个 GPU: {details}"
+        )
+
+
 def _validate_single_dc_collective_participants(
     participants: list[str],
     gpu_node_ids: list[str],
@@ -633,6 +865,8 @@ def _sample_profile(rng: random.Random) -> dict[str, Any]:
 
 
 def _prompt_choice(prompt_text: str, options: dict[str, str], default_key: str) -> str:
+    if not sys.stdin.isatty():
+        return default_key
     rendered = ", ".join(f"{key}={value}" for key, value in options.items())
     while True:
         raw = input(f"{prompt_text}（{rendered}，默认 {default_key}）: ").strip()
