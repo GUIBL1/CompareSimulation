@@ -565,13 +565,14 @@ def _evaluate_trial(
     seed_results: list[SeedResult] = []
     pruned = False
     workers = max(1, min(int(max_workers), len(seeds)))
+    min_required_seeds = max(1, int(min_seeds_before_prune))
 
     if parallel_backend == "off" or workers <= 1 or len(seeds) <= 1:
         for seed in seeds:
             seed_results.append(_run_single_seed(experiment_file, params, int(seed), max_time_ms_override))
             if prune_threshold is None:
                 continue
-            if len(seed_results) < max(1, int(min_seeds_before_prune)):
+            if len(seed_results) < min_required_seeds:
                 continue
             lower_bound = _optimistic_score_lower_bound(seed_results, total_seed_count=len(seeds))
             if lower_bound >= prune_threshold:
@@ -579,35 +580,45 @@ def _evaluate_trial(
                 break
     else:
         executor_cls = ProcessPoolExecutor if parallel_backend == "process" else ThreadPoolExecutor
-        executor = executor_cls(max_workers=workers)
-        future_by_seed = {
-            executor.submit(_run_single_seed, experiment_file, params, int(seed), max_time_ms_override): int(seed)
-            for seed in seeds
-        }
-        try:
-            for future in as_completed(future_by_seed):
-                seed = future_by_seed[future]
+        seed_queue = [int(seed) for seed in seeds]
+        next_seed_index = 0
+        with executor_cls(max_workers=workers) as executor:
+            in_flight: dict[Any, int] = {}
+
+            def _submit_one() -> bool:
+                nonlocal next_seed_index
+                if next_seed_index >= len(seed_queue):
+                    return False
+                seed_value = seed_queue[next_seed_index]
+                next_seed_index += 1
+                future = executor.submit(_run_single_seed, experiment_file, params, seed_value, max_time_ms_override)
+                in_flight[future] = seed_value
+                return True
+
+            while len(in_flight) < workers and _submit_one():
+                pass
+
+            while in_flight:
+                future = next(as_completed(list(in_flight.keys())))
+                seed = in_flight.pop(future)
                 try:
                     result = future.result()
                 except Exception as exc:
                     raise RuntimeError(f"seed={seed} 执行失败: {exc}") from exc
-                seed_results.append(result)
-                if prune_threshold is None:
-                    continue
-                if len(seed_results) < max(1, int(min_seeds_before_prune)):
-                    continue
-                lower_bound = _optimistic_score_lower_bound(seed_results, total_seed_count=len(seeds))
-                if lower_bound >= prune_threshold:
-                    pruned = True
-                    for pending in future_by_seed:
-                        if not pending.done():
-                            pending.cancel()
-                    break
-        finally:
-            if pruned:
-                executor.shutdown(wait=False, cancel_futures=True)
-            else:
-                executor.shutdown(wait=True, cancel_futures=False)
+
+                if not pruned:
+                    seed_results.append(result)
+
+                    if prune_threshold is not None and len(seed_results) >= min_required_seeds:
+                        lower_bound = _optimistic_score_lower_bound(seed_results, total_seed_count=len(seeds))
+                        if lower_bound >= prune_threshold:
+                            pruned = True
+                            for pending in list(in_flight.keys()):
+                                if pending.cancel():
+                                    in_flight.pop(pending, None)
+
+                if not pruned:
+                    _submit_one()
 
     if not seed_results:
         raise RuntimeError("trial 未得到任何 seed 结果")
