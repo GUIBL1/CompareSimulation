@@ -1,0 +1,51 @@
+meta:
+  name: inter_dc_parallel_triple_heavy_crossweaver
+  version: 1
+  description: CrossWeaver on the triple inter-dc topology under full-duplex heavy
+    cross-dc traffic
+inputs:
+  topology_file: configs/topology/inter_dc_triple_topology.yaml
+  workload_file: configs/workload/inter_dc_heavy_workload_16_job.yaml
+scheduler:
+  type: crossweaver
+  crux:
+    max_priority_levels: 8
+  teccl:
+    epoch_size_ms: 100
+    solver_backend: highs
+  ecmp:
+    stable_per_flow: true
+  crossweaver:
+    slot_ms: 1.0
+    headroom_ratio: 0.068835
+    epsilon: 0.15805
+    gamma: 0.027042
+    stage1_max_iterations: 31
+    stage1_binary_search_rounds: 50
+    stage1_backoff_ratio: 0.852686
+    stage1_backoff_max_rounds: 8
+    stage1_safety_margin_ratio: 0.208362
+    stage1_rate_smoothing_alpha: 0.781023
+    stage1_rate_change_cap_ratio: 1.291704
+    stage2_max_iterations: 54
+    stage2_binary_search_rounds: 39
+    cross_path_ecmp_k: 2
+    stage2_path_split_k: 7
+    stage2_initial_max_paths: 7
+    stage2_max_path_expansion: 31
+    stage2_path_expansion_step: 8
+    stage2_softmin_temperature: 0.643703
+    wcmp_update_threshold_l1: 0.275775
+    feasibility_tolerance: 1.0e-06
+    queue_wait_estimation_mode: zero
+simulation:
+  time_unit: ms
+  max_time_ms: 200000
+  bandwidth_sharing_model: max_min_fair
+  random_seed: 20260308
+  repetitions: 1
+metrics:
+  export_csv: true
+  export_json: true
+  export_trace: true
+  output_dir: results/inter_dc_parallel_triple_heavy_crossweaver

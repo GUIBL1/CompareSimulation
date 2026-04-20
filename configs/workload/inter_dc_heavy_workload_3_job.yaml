@@ -1,0 +1,125 @@
+meta:
+  name: generated_workload
+  version: 1
+  description: workload generated from topology GPU node ids
+jobs:
+- job_id: job_001
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_0
+  - gpu_1
+  - gpu_2
+  - gpu_5
+  communication_pattern: broadcast
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_002
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_8
+  - gpu_10
+  - gpu_12
+  - gpu_13
+  communication_pattern: all_reduce
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_003
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_0
+  - gpu_8
+  communication_pattern: point_to_point
+  total_data_mb: 1024.0
+  chunk_count: 8
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: independent
+- job_id: job_004
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_1
+  - gpu_3
+  - gpu_4
+  - gpu_5
+  communication_pattern: broadcast
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_005
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_11
+  - gpu_12
+  - gpu_13
+  - gpu_14
+  communication_pattern: broadcast
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_006
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_4
+  - gpu_14
+  communication_pattern: point_to_point
+  total_data_mb: 1024.0
+  chunk_count: 8
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: independent
+- job_id: job_007
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_2
+  - gpu_3
+  - gpu_5
+  - gpu_7
+  communication_pattern: broadcast
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_008
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_8
+  - gpu_9
+  - gpu_10
+  - gpu_15
+  communication_pattern: all_gather
+  total_data_mb: 4096.0
+  chunk_count: 16
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: strict
+- job_id: job_009
+  arrival_time_ms: 0.0
+  participants:
+  - gpu_2
+  - gpu_10
+  communication_pattern: point_to_point
+  total_data_mb: 1024.0
+  chunk_count: 8
+  compute_phase_ms: 0.0
+  iteration_count: 1
+  repeat_interval_ms: 0.0
+  dependency_mode: independent
