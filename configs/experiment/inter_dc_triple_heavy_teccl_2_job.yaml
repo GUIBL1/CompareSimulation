@@ -16,7 +16,7 @@ scheduler:
   teccl:
     epoch_size_ms: 15
     solver_backend: highs
-    max_epoch_count: 70
+    max_epoch_count: 100
     max_solver_time_ms: 7200000
     mip_gap: 0.2
     solver_threads: 50
