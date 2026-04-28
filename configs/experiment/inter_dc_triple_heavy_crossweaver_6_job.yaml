@@ -17,27 +17,27 @@ scheduler:
     stable_per_flow: true
   crossweaver:
     slot_ms: 1.0
-    headroom_ratio: 0.032284
-    epsilon: 0.087026
-    gamma: 0.093893
-    stage1_max_iterations: 46
-    stage1_binary_search_rounds: 51
-    stage1_backoff_ratio: 0.782552
-    stage1_backoff_max_rounds: 8
-    stage1_safety_margin_ratio: 0.084049
-    stage1_rate_smoothing_alpha: 0.443629
-    stage1_rate_change_cap_ratio: 0.433341
-    stage2_max_iterations: 54
-    stage2_binary_search_rounds: 19
-    cross_path_ecmp_k: 2
-    stage2_path_split_k: 7
-    stage2_initial_max_paths: 17
-    stage2_max_path_expansion: 22
-    stage2_path_expansion_step: 5
-    stage2_softmin_temperature: 0.853377
-    wcmp_update_threshold_l1: 0.037262
+    headroom_ratio: 0.15
+    epsilon: 0.05464
+    gamma: 0.12
+    stage1_max_iterations: 45
+    stage1_binary_search_rounds: 47
+    stage1_backoff_ratio: 0.942295
+    stage1_backoff_max_rounds: 3
+    stage1_safety_margin_ratio: 0.219279
+    stage1_rate_smoothing_alpha: 0.451162
+    stage1_rate_change_cap_ratio: 0.567383
+    stage2_max_iterations: 59
+    stage2_binary_search_rounds: 16
+    cross_path_ecmp_k: 8
+    stage2_path_split_k: 5
+    stage2_initial_max_paths: 6
+    stage2_max_path_expansion: 23
+    stage2_path_expansion_step: 9
+    stage2_softmin_temperature: 0.05
+    wcmp_update_threshold_l1: 0.128705
     feasibility_tolerance: 1.0e-06
-    queue_wait_estimation_mode: zero
+    queue_wait_estimation_mode: observed
 simulation:
   time_unit: ms
   max_time_ms: 200000
